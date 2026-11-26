@@ -2143,15 +2143,6 @@
         "removeConfirm_indicators": "Remove all {{n}} indicators from the chart?",
         "removeConfirm_all": "Remove all {{d}} drawings on this symbol and the {{n}} indicators on the chart?"
       }
-    },
-    "mbar": {
-      "symbol": "Change symbol",
-      "draw": "Drawing tools",
-      "more": "More",
-      "undo": "Undo",
-      "redo": "Redo",
-      "showPositions": "Show positions & orders",
-      "hidePositions": "Hide positions & orders"
     }
   },
   "winrate": {

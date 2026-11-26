@@ -57,9 +57,6 @@ export interface DrawLayerHandle {
   unlockAll: () => void
   undo: () => void
   redo: () => void
-  // 当前品种还能不能撤销 / 重做（手机底栏的按钮用）/ whether undo / redo is possible for this symbol (phone bottom bar)
-  canUndo: () => boolean
-  canRedo: () => boolean
   // 磁吸：画线时把点吸到 K 线的开高低收上（weak = 靠近才吸，strong = 总是吸）
   // Magnet: snap points to the bar's OHLC while drawing (weak = when close, strong = always)
   magnet: MagnetMode
@@ -456,8 +453,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     tool, setTool, color, setColor, selectedId: sel[0] ?? null, selectedCount: sel.length,
     drawCount: drawings.length, lockedCount, stayInDraw, setStayInDraw, visible, setVisible, getDrawings: () => drawingsRef.current,
     deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet,
-    canUndo: () => (stacksRef.current.get(symRef.current)?.u.length ?? 0) > 0,
-    canRedo: () => (stacksRef.current.get(symRef.current)?.r.length ?? 0) > 0,
     favorites, toggleFavorite, treeOpen, toggleTree,
   }), [tool, setTool, color, sel, drawings.length, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet, favorites, toggleFavorite, treeOpen, toggleTree])
   const onStateChangeRef = useRef(onStateChange)

@@ -2143,15 +2143,6 @@
         "removeConfirm_indicators": "チャートのインジケーター {{n}} 件をすべて削除しますか？",
         "removeConfirm_all": "この銘柄の描画 {{d}} 件とチャートのインジケーター {{n}} 件をすべて削除しますか？"
       }
-    },
-    "mbar": {
-      "symbol": "銘柄を切替",
-      "draw": "描画ツール",
-      "more": "その他",
-      "undo": "元に戻す",
-      "redo": "やり直す",
-      "showPositions": "ポジションと注文を表示",
-      "hidePositions": "ポジションと注文を非表示"
     }
   },
   "winrate": {

@@ -14,8 +14,6 @@ interface Props {
   onChange: (code: string) => void
   favorites: string[]
   onFavorites: (codes: string[]) => void
-  // 手机底栏：按钮直接写当前周期（「1H ▾」），不只是小箭头 / phone bottom bar: the button shows the current interval
-  asLabel?: boolean
 }
 
 export function Star({ on }: { on: boolean }) {
@@ -26,7 +24,7 @@ export function Star({ on }: { on: boolean }) {
   )
 }
 
-export default function IntervalMenu({ value, onChange, favorites, onFavorites, asLabel = false }: Props) {
+export default function IntervalMenu({ value, onChange, favorites, onFavorites }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
@@ -55,15 +53,14 @@ export default function IntervalMenu({ value, onChange, favorites, onFavorites, 
       <button
         ref={btnRef}
         type="button"
-        className={asLabel ? `term-mbar-btn term-mbar-txt ${open ? 'on' : ''}` : `term-tool-btn term-iv-more ${open ? 'on' : ''}`}
+        className={`term-tool-btn term-iv-more ${open ? 'on' : ''}`}
         title={label}
         aria-label={label}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => (open ? close() : setOpen(true))}
       >
-        {asLabel && <span>{intervalLabel(value)}</span>}
-        <svg width={asLabel ? 10 : 12} height={asLabel ? 10 : 12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
       </button>
       <ChartPopover open={open} onClose={close} anchorRef={btnRef} width={240} label={label} className="chart-iv">
         <form className="chart-iv-in" onSubmit={(e) => { e.preventDefault(); submit() }}>

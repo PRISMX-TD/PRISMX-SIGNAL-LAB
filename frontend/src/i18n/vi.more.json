@@ -2143,15 +2143,6 @@
         "removeConfirm_indicators": "Xóa toàn bộ {{n}} chỉ báo trên biểu đồ?",
         "removeConfirm_all": "Xóa toàn bộ {{d}} hình vẽ của mã này và {{n}} chỉ báo trên biểu đồ?"
       }
-    },
-    "mbar": {
-      "symbol": "Đổi mã",
-      "draw": "Công cụ vẽ",
-      "more": "Thêm",
-      "undo": "Hoàn tác",
-      "redo": "Làm lại",
-      "showPositions": "Hiện vị thế & lệnh",
-      "hidePositions": "Ẩn vị thế & lệnh"
     }
   },
   "winrate": {
