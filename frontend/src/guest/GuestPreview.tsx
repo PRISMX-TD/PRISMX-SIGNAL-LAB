@@ -27,6 +27,7 @@ import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
 import { useHeroSymbols } from '../components/signals/SymbolTabs'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
+import EconTodayCard from '../components/admin/econ/EconTodayCard'
 import { ClockTtlRing } from '../components/signals/TtlRing'
 import { useBucketedNow, useFocusEntries } from '../components/signals/hooks'
 import { trendStance, type FocusState, type TrendStance } from '../components/signals/SignalView'
@@ -35,7 +36,7 @@ import GateModal from './GateModal'
 import { useExitIntent, useGateCapture, type GateReason } from './gate'
 import { markHomeView, releaseHomeHold, trackHome } from './homeMode'
 import {
-  useGuestAnalysis, useGuestCompetition, useGuestOffer, useGuestPreviewData, type GuestPreviewPayload,
+  loadGuestEcon, useGuestAnalysis, useGuestCompetition, useGuestOffer, useGuestPreviewData, type GuestPreviewPayload,
 } from './previewData'
 import '../styles/guest.css'
 
@@ -124,6 +125,9 @@ const GuestDashboard: FC<{ data: GuestPreviewPayload; competition: CompetitionSu
     [focusEntries, idx],
   )
   const marquee = useMemo(() => (competition ? [competition] : []), [competition])
+  // 和 DashboardPage 一样放在「其他活跃信号」下面；memo 住，SignalOthers 才不会白白重渲染
+  // Under "other active signals" as on DashboardPage; memoised so SignalOthers is not re-rendered
+  const econCard = useMemo(() => <EconTodayCard source={loadGuestEcon} />, [])
 
   return (
     <div className="max-w-[1520px] mx-auto">
@@ -142,7 +146,7 @@ const GuestDashboard: FC<{ data: GuestPreviewPayload; competition: CompetitionSu
           <SessionWinrateCard preset={analysis} presetLoading={analysis == null} />
           <RecentResultsCard signals={data.recent} stats={data.recentStats} />
         </div>
-        <SignalOthers entries={otherEntries} onTrade={noop} onFocus={setFocusIdx} onViewAll={noop} />
+        <SignalOthers entries={otherEntries} onTrade={noop} onFocus={setFocusIdx} onViewAll={noop}>{econCard}</SignalOthers>
       </div>
     </div>
   )
