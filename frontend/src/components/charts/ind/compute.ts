@@ -91,9 +91,10 @@ export interface CalcInput {
   priceBased: boolean
   symbol?: string
   other?: (symbol: string, interval: string) => Candle[] | null
+  intrabar?: (code: string, t0: number, key: string) => Candle[] | null
 }
 
-export function computeAll({ list, bars, interval, digits, priceBased, symbol, other }: CalcInput): Map<string, InstResult> {
+export function computeAll({ list, bars, interval, digits, priceBased, symbol, other, intrabar }: CalcInput): Map<string, InstResult> {
   const byUid = new Map(list.map((i) => [i.uid, i]))
   const results = new Map<string, InstResult>()
   const busy = new Set<string>()
@@ -129,7 +130,7 @@ export function computeAll({ list, bars, interval, digits, priceBased, symbol, o
     let extras: IndExtras = {}
     try {
       if (!tf) {
-        const raw = def.compute({ bars, interval, digits, symbol, other }, inst.inputs, chartSrc)
+        const raw = def.compute({ bars, interval, digits, symbol, other, intrabar }, inst.inputs, chartSrc)
         extras = (raw.__x as IndExtras | undefined) ?? {}
         delete raw.__x
         out = raw as IndOutput

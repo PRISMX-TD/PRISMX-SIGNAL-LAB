@@ -57,6 +57,7 @@ import { fillStyle, hlineStyle, plotStyle, resolveColor } from './ind/style'
 import { IndFillPrimitive, type FillBetween, type FillBand } from './ind/fillPrimitive'
 import { EMPTY_SCENE, IndShapePrimitive, type ShapeScene } from './ind/shapePrimitive'
 import { otherBars, subscribeOtherBars } from './ind/otherBars'
+import { intrabarBars, subscribeIntrabar } from './draw/intrabar'
 import type { IndDef, IndExtras, IndInstance, IndPane, PlotKind } from './ind/types'
 
 export type MainSeriesApi = ISeriesApi<'Custom', Time, MainBar | WhitespaceData<Time>, MainSeriesOptions, DeepPartial<MainSeriesOptions>>
@@ -339,6 +340,9 @@ export function useChartEngine(
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
   }, [])
 
+  // 建序列的线数（只当图形样式的不算）/ plots that get a series (style-only shape plots don't)
+  const seriesPlots = (def: IndDef) => def.plots.filter((p) => !p.shape).length
+
   // 未来时间：一目云图这类往右平移的线要画到最新 K 线右边，按最近的 K 线间距往后推。
   // Future times for plots shifted right (Ichimoku cloud), extrapolated from the recent bar spacing.
   const futureTimes = (times: number[], k: number): number[] => {
@@ -357,8 +361,18 @@ export function useChartEngine(
     if (!x.rects && !x.segs && !x.labels && !x.profiles && !x.vpVisible && !x.tpos && !x.table && !x.gauge) return null
     const cc = candleColorsRef.current
     const txt = markerTextRef.current
+    // 'p:<key>' 跟图形线样式（颜色、透明度、显隐；线宽线型在 segs 里取）/ 'p:<key>' follows a shape plot's style
+    const shapePlot = (c?: string | null) => {
+      if (!c?.startsWith('p:')) return null
+      const p = def.plots.find((k) => k.key === c.slice(2))
+      return p ? plotStyle(inst, p) : null
+    }
     const col = (c?: string | null): string | null => {
       if (!c) return null
+      if (c.startsWith('p:')) {
+        const ps = shapePlot(c)
+        return ps?.visible ? resolveColor(ps.color, cc, ps.opacity) : null
+      }
       if (c.startsWith('f:')) {
         const f = def.fills?.find((k) => k.key === c.slice(2))
         if (!f) return null
@@ -369,8 +383,11 @@ export function useChartEngine(
     }
     const clear = 'rgba(0,0,0,0)'
     const tx = (t: string) => (t.startsWith('mk.') ? txt[t] ?? t.slice(3) : t)
-    const prof = <T extends { up: string; dn: string; vaUp: string; vaDn: string; poc: string }>(p: T): T =>
-      ({ ...p, up: col(p.up) ?? clear, dn: col(p.dn) ?? clear, vaUp: col(p.vaUp) ?? clear, vaDn: col(p.vaDn) ?? clear, poc: col(p.poc) ?? '' })
+    const prof = <T extends { up: string; dn: string; vaUp: string; vaDn: string; poc: string; vah?: string; val?: string; box?: string }>(p: T): T =>
+      ({
+        ...p, up: col(p.up) ?? clear, dn: col(p.dn) ?? clear, vaUp: col(p.vaUp) ?? clear, vaDn: col(p.vaDn) ?? clear, poc: col(p.poc) ?? '',
+        vah: col(p.vah) ?? undefined, val: col(p.val) ?? undefined, box: col(p.box) ?? undefined,
+      })
     const pal = viewRef.current?.palette
     return {
       rects: (x.rects ?? []).flatMap((r) => {
@@ -378,7 +395,12 @@ export function useChartEngine(
         const stroke = col(r.stroke) ?? undefined
         return fill || stroke ? [{ ...r, fill, stroke }] : []
       }),
-      segs: (x.segs ?? []).flatMap((g) => { const c = col(g.color); return c ? [{ ...g, color: c }] : [] }),
+      segs: (x.segs ?? []).flatMap((g) => {
+        const c = col(g.color)
+        if (!c) return []
+        const ps = shapePlot(g.color)
+        return [ps ? { ...g, color: c, width: ps.width, dash: ps.dash } : { ...g, color: c }]
+      }),
       labels: (x.labels ?? []).flatMap((l) => { const c = col(l.color); return c ? [{ ...l, text: tx(l.text), color: c, bg: col(l.bg) ?? undefined }] : [] }),
       profiles: (x.profiles ?? []).map(prof),
       vp: x.vpVisible ? { ...prof(x.vpVisible), bars } : null,
@@ -410,7 +432,9 @@ export function useChartEngine(
       return
     }
     const list = iv.list.filter((i) => handles.has(i.uid))
-    const results = computeAll({ list, bars, interval: iv.interval, digits: iv.digits, priceBased: onBricks, symbol: iv.symbol, other: otherBars })
+    // 小周期 K 线（周期成交量分布用）：与画线的成交量分布共用一份缓存 / lower-timeframe bars (periodic volume profile), shared with the drawing tools' cache
+    const intrabar = (code: string, t0: number, key: string) => intrabarBars(iv.symbol, iv.interval, t0, Infinity, key, code)?.bars ?? null
+    const results = computeAll({ list, bars, interval: iv.interval, digits: iv.digits, priceBased: onBricks, symbol: iv.symbol, other: otherBars, intrabar })
     resultsRef.current = results
     const n = bars.length
     const times = bars.map((b) => b.t)
@@ -528,6 +552,7 @@ export function useChartEngine(
 
   // 别的品种 / 日线到了就重算 / recompute when another symbol's or the daily bars arrive
   useEffect(() => subscribeOtherBars(() => recomputeRef.current?.()), [])
+  useEffect(() => subscribeIntrabar(() => recomputeRef.current?.()), [])
 
   // 窗格高度：主图与各副图按权重分；折叠的固定 28px；最大化时其余全部折叠。
   // Pane heights: main and sub-panes split by weight; collapsed ones are 28px; a maximised pane
@@ -828,13 +853,14 @@ export function useChartEngine(
     for (const inst of iv.list) {
       const def = defOf(inst.type)
       if (!def) continue
-      if (inst.pane === 'main' || def.plots.length === 0 || !used.some((p) => p.id === inst.pane)) order.push({ inst, pane: 0 })
+      if (inst.pane === 'main' || !seriesPlots(def) || !used.some((p) => p.id === inst.pane)) order.push({ inst, pane: 0 })
     }
-    used.forEach((p, k) => { for (const inst of iv.list) if (inst.pane === p.id && (defOf(inst.type)?.plots.length ?? 0) > 0) order.push({ inst, pane: k + 1 }) })
+    used.forEach((p, k) => { for (const inst of iv.list) { const d = defOf(inst.type); if (inst.pane === p.id && d && seriesPlots(d)) order.push({ inst, pane: k + 1 }) } })
     let anyLeft = false
     for (const { inst, pane } of order) {
       const def = defOf(inst.type)!
-      const plots: PlotHandle[] = def.plots.map((p) => {
+      // 只当图形样式用的线不建序列 / style-only shape plots get no series
+      const plots: PlotHandle[] = def.plots.filter((p) => !p.shape).map((p) => {
         const kind = plotStyle(inst, p).kind
         const api = chart.addSeries(seriesTypeOf(kind) as typeof LineSeries, plotOptions(inst, def, p.key) as never, pane) as unknown as PlotApi
         return { key: p.key, kind, api }

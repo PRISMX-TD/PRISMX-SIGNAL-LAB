@@ -46,6 +46,9 @@ export interface PlotDef {
   noLegend?: boolean
   // 在中间的空值处断开（枢轴点、分段线）/ break at interior nulls
   gaps?: boolean
+  // 只当图形的线样式用（不建序列）：图形颜色写 'p:<key>'，线宽、线型也跟这条的样式
+  // Style-only plot for shapes (no series): shapes write 'p:<key>' and take its width and dash too
+  shape?: boolean
 }
 
 export interface HlineDef {
@@ -79,6 +82,10 @@ export interface IndCtx {
   // 别的品种 / 周期的 K 线（异步取，没到时 null，到了会触发重算）
   // Bars of another symbol / interval (fetched async; null until they arrive, which triggers a recompute)
   other?: (symbol: string, interval: string) => Candle[] | null
+  // 本品种的小周期 K 线 [t0, 最新]（周期代码、起点、去抖键；没到时 null，到了会触发重算）
+  // This symbol's lower-timeframe bars from t0 to the newest (code, start, debounce key; null until
+  // they arrive, which triggers a recompute)
+  intrabar?: (code: string, t0: number, key: string) => Candle[] | null
 }
 
 // 计算结果：每条 plot 一列数组；另有可选的特殊输出（标记、区域、竖条、背景色）。
@@ -100,12 +107,21 @@ export interface IndExtras {
   // ── Batch 3 shapes (drawn by ind/shapePrimitive). Colours: '#hex', 'up' / 'down', or 'f:<fill key>'
   // (the style tab's fill colour and opacity; hidden fill = not drawn); texts starting 'mk.' are
   // translated from charts.ind.mk.*. Bar index i; i2 = -1 means to the right edge.
-  rects?: { i1: number; i2: number; top: number; bottom: number; fill?: string; stroke?: string; dash?: LineDash; back?: boolean }[]
+  // ctr = 左右边在 K 线中心（不是整根的外沿）/ ctr = edges at bar centres rather than the bars' outer edges
+  rects?: { i1: number; i2: number; top: number; bottom: number; fill?: string; stroke?: string; dash?: LineDash; back?: boolean; ctr?: boolean }[]
   segs?: { i1: number; p1: number; i2: number; p2: number; color: string; width?: number; dash?: LineDash }[]
-  labels?: { i: number; p: number; text: string; color: string; bg?: string; align?: 'left' | 'right' | 'center'; pos?: 'above' | 'below' | 'middle' }[]
-  // 成交量分布：anchor 'left' 从区间左边往右长，'right' 从区间右边往左长；width = 占区间宽度的比例
-  // Volume profiles: anchor 'left' grows right from the range start, 'right' grows left from its end; width = share of the range
-  profiles?: { p: Profile; anchor: 'left' | 'right'; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }[]
+  // size = 字号 px；文字可用 \n 换行；cd = 倒计时的结束时间（秒），画的时候每秒现算一行 'HH:MM:SS'
+  // size = font px; texts may contain \n; cd = a countdown's end time (s), drawn live as an extra 'HH:MM:SS' line
+  labels?: { i: number; p: number; text: string; color: string; bg?: string; align?: 'left' | 'right' | 'center'; pos?: 'above' | 'below' | 'middle'; size?: number; cd?: number }[]
+  // 成交量分布：anchor 'left' 从区间左边往右长，'right' 从区间右边往左长；width = 占区间宽度的比例。
+  // 可选：mode（上涨/下跌、总量、差值）、VAH / VAL 虚线、POC / VAH / VAL 向右延伸、区间底色。
+  // Volume profiles: anchor 'left' grows right from the range start, 'right' grows left from its end; width = share of the range.
+  // Optional: mode (up/down, total, delta), dotted VAH / VAL lines, POC / VAH / VAL extended right, a range background.
+  profiles?: {
+    p: Profile; anchor: 'left' | 'right'; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string
+    mode?: 'updown' | 'total' | 'delta'; hist?: boolean; vah?: string; val?: string; box?: string
+    ext?: { poc?: boolean; vah?: boolean; val?: boolean }
+  }[]
   // 可见范围成交量分布：画的时候按当前可见的 K 线现算，贴在窗格右边 / visible-range profile, computed at draw time, docked right
   vpVisible?: { rows: number; vaPct: number; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }
   tpos?: { t: Tpo; color: string; vaColor: string; poc: string; ib: string | null; letters: boolean }[]

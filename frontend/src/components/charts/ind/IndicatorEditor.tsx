@@ -185,8 +185,8 @@ export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, 
                 <ColorPicker color={st.color} resolved={resolveColor(st.color, candle)} opacity={st.opacity} label={plotLabel(p.label)} onChange={(nc, op) => setStyle(p.key, { color: nc, ...(op != null ? { opacity: op } : {}) })} />
               )}
               <Sel value={String(st.width)} label={tt('charts.ind.ui.width')} onChange={(x) => setStyle(p.key, { width: Number(x) })} options={['1', '2', '3', '4'].map((w) => ({ v: w, label: `${w}px` }))} />
-              <Sel value={st.kind} label={tt('charts.ind.ui.plotKind')} onChange={(x) => setStyle(p.key, { kind: x })} options={KINDS.map((k) => ({ v: k, label: tt(`charts.ind.kind.${k}`) }))} />
-              {lineish && <Sel value={st.dash} label={tt('charts.ind.ui.dash')} onChange={(x) => setStyle(p.key, { dash: x })} options={DASHES.map((k) => ({ v: k, label: tt(`charts.ind.dash.${k}`) }))} />}
+              {!p.shape && <Sel value={st.kind} label={tt('charts.ind.ui.plotKind')} onChange={(x) => setStyle(p.key, { kind: x })} options={KINDS.map((k) => ({ v: k, label: tt(`charts.ind.kind.${k}`) }))} />}
+              {(lineish || p.shape) && <Sel value={st.dash} label={tt('charts.ind.ui.dash')} onChange={(x) => setStyle(p.key, { dash: x })} options={DASHES.map((k) => ({ v: k, label: tt(`charts.ind.dash.${k}`) }))} />}
             </span>
           </div>
         )
@@ -235,7 +235,7 @@ export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, 
           onChange={(x) => set({ labels: x === 'auto' ? null : x === 'on' })}
           options={[{ v: 'auto', label: tt('charts.ind.ui.followGlobal') }, { v: 'on', label: tt('charts.ind.ui.show') }, { v: 'off', label: tt('charts.ind.ui.hide') }]} />
       </Row>
-      {def.plots.length > 0 && (
+      {def.plots.some((p) => !p.shape) && (
         <Row label={tt('charts.ind.ui.scale')}>
           <Sel value={inst.scale ?? (inst.pane === 'main' && !def.overlay ? 'none' : 'right')} label={tt('charts.ind.ui.scale')} onChange={(x) => set({ scale: x })}
             options={(['right', 'left', 'none'] as const).map((s) => ({ v: s, label: tt(`charts.ind.ui.scale_${s}`) }))} />

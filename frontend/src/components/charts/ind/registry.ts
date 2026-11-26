@@ -20,6 +20,7 @@ import {
   netVolume, ppo, priceChannel, pvt, rvi, smi, trix, tsi, twap, ulcer, ultimate, volStop, volumeOsc, vortex, type StopOut,
 } from './math2'
 import { DEFS3 } from './registry3'
+import { DEFS4 } from './registry4'
 import type { FillDef, HlineDef, IndDef, IndExtras, IndMarker, IndOutput, Inputs, InputDef, PlotDef } from './types'
 
 const num = (inp: Inputs, k: string) => Number(inp[k])
@@ -847,7 +848,7 @@ function sigMarkers(sig: (number | null)[]): IndMarker[] {
 // 旧调用方从这里取券商日期函数 / older callers import the broker date helpers from here
 export { brokerDay, brokerMonth, brokerWeek }
 
-const ALL_DEFS = [...DEFS, ...DEFS3]
+const ALL_DEFS = [...DEFS, ...DEFS3, ...DEFS4]
 export const IND_DEFS: ReadonlyMap<string, IndDef> = new Map(ALL_DEFS.map((d) => [d.id, d]))
 export const IND_IDS: string[] = ALL_DEFS.map((d) => d.id)
 export const IND_GROUPS = ['ma', 'trend', 'momentum', 'volatility', 'volume', 'levels', 'patterns', 'stats', 'custom'] as const

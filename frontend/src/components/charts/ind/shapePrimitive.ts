@@ -13,6 +13,7 @@ import type {
 } from 'lightweight-charts'
 import type { Candle } from '../../../api/types'
 import { volumeProfile, type Profile } from './math3'
+import { countdownText } from './math4'
 import type { IndExtras, LineDash } from './types'
 
 export interface ShapeTheme { bg: string; text: string; border: string }
@@ -61,6 +62,8 @@ export class IndShapePrimitive {
   // 可见范围分布的缓存 / cache for the visible-range profile
   private vpKey = ''
   private vpProf: Profile | null = null
+  // 有倒计时标签时每秒重画一次 / repaint every second while a countdown label is shown
+  private tick: ReturnType<typeof setInterval> | null = null
 
   constructor() {
     const rb: IPrimitivePaneRenderer = { draw: () => {}, drawBackground: (t: Target) => this.drawBack(t) }
@@ -70,14 +73,20 @@ export class IndShapePrimitive {
   }
 
   attached(p: SeriesAttachedParameter<Time>) { this.chart = p.chart; this.series = p.series; this.ru = p.requestUpdate }
-  detached() { this.chart = null; this.series = null; this.ru = null }
+  detached() { this.chart = null; this.series = null; this.ru = null; this.ticker(false) }
   paneViews(): readonly IPrimitivePaneView[] { return [this.back, this.front] }
   updateAllViews() { /* renderers read live state */ }
 
   set(scene: ShapeScene) {
     this.scene = scene
     this.vpKey = ''
+    this.ticker(scene.labels.some((l) => l.cd != null))
     this.ru?.()
+  }
+
+  private ticker(on: boolean) {
+    if (on && !this.tick) this.tick = setInterval(() => this.ru?.(), 1000)
+    else if (!on && this.tick) { clearInterval(this.tick); this.tick = null }
   }
 
   // K 线下标 → x；-1 = 右边缘 / bar index → x; -1 = right edge
@@ -125,8 +134,8 @@ export class IndShapePrimitive {
     const y1 = this.y(r.top)
     const y2 = this.y(r.bottom)
     if (x1 == null || x2 == null || y1 == null || y2 == null) return
-    const l = x1 - h
-    const w = (r.i2 < 0 ? x2 : x2 + h) - l
+    const l = r.ctr ? x1 : x1 - h
+    const w = (r.i2 < 0 || r.ctr ? x2 : x2 + h) - l
     if (w <= 0 || l > width || l + w < 0) return
     const t = Math.min(y1, y2)
     const hh = Math.max(1, Math.abs(y2 - y1))
@@ -159,12 +168,16 @@ export class IndShapePrimitive {
   private label(ctx: Ctx, l: ShapeScene['labels'][number], width: number) {
     const x = this.x(l.i, width)
     const y = this.y(l.p)
-    if (x == null || y == null || !l.text) return
-    ctx.font = FONT
-    const tw = ctx.measureText(l.text).width
+    const lines = l.text ? l.text.split('\n') : []
+    if (l.cd != null) lines.push(countdownText(l.cd - Date.now() / 1000))
+    if (x == null || y == null || lines.length === 0) return
+    const fs = l.size ?? 11
+    ctx.font = l.size ? `${fs}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif` : FONT
+    const tw = Math.max(...lines.map((s) => ctx.measureText(s).width))
     const padX = l.bg ? 5 : 0
     const bw = tw + padX * 2
-    const bh = 17
+    const lh = Math.round(fs * 1.35)
+    const bh = Math.max(17, lines.length * lh + 2)
     const align = l.align ?? 'center'
     let bx = align === 'left' ? x + 4 : align === 'right' ? x - 4 - bw : x - bw / 2
     bx = Math.max(2, Math.min(width - bw - 2, bx))
@@ -177,13 +190,19 @@ export class IndShapePrimitive {
     }
     ctx.fillStyle = l.color
     ctx.textBaseline = 'middle'
-    ctx.textAlign = 'left'
-    ctx.fillText(l.text, bx + padX, by + bh / 2 + 0.5)
+    // 多行时居中对齐（周期标签 + 倒计时）/ multi-line text is centred (timeframe label + countdown)
+    const multi = lines.length > 1
+    ctx.textAlign = multi ? 'center' : 'left'
+    const y0 = by + bh / 2 - ((lines.length - 1) * lh) / 2 + 0.5
+    lines.forEach((s, k) => ctx.fillText(s, multi ? bx + bw / 2 : bx + padX, y0 + k * lh))
   }
 
-  // 一个分布：区间 [i1, i2]，按 anchor 贴左或贴右；价值区内的行用更实的颜色，POC 画一条线
-  // One profile over [i1, i2], docked left or right; value-area rows use the stronger colours, POC gets a line
-  private profile(ctx: Ctx, d: { anchor: 'left' | 'right'; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }, p: Profile, width: number, dock?: { x0: number; x1: number }) {
+  // 一个分布：区间 [i1, i2]，按 anchor 贴左或贴右；价值区内的行用更实的颜色，POC 画一条线。
+  // mode：上涨/下跌（两段）、总量（一段）、差值（|涨−跌|，跌多用跌色）；vah / val 画虚线；ext 让线伸到右边缘；box 是区间底色。
+  // One profile over [i1, i2], docked left or right; value-area rows use the stronger colours, POC gets a line.
+  // mode: up/down (two segments), total (one), delta (|up − down|, down colour when down wins); vah / val are
+  // dotted lines; ext runs a line to the right edge; box is the range background.
+  private profile(ctx: Ctx, d: Omit<ShapeScene['profiles'][number], 'p'>, p: Profile, width: number, dock?: { x0: number; x1: number }) {
     const h = this.half()
     let left: number
     let right: number
@@ -194,42 +213,59 @@ export class IndShapePrimitive {
       left = a - h
       right = b + h
     }
-    if (right < 0 || left > width) return
+    const ext = d.ext ?? {}
+    if ((right < 0 && !ext.poc && !ext.vah && !ext.val) || left > width) return
+    const R = p.up.length
+    if (d.box) {
+      const ya = this.y(p.lo + R * p.step)
+      const yb = this.y(p.lo)
+      if (ya != null && yb != null) { ctx.fillStyle = d.box; ctx.fillRect(left, Math.min(ya, yb), right - left, Math.abs(yb - ya)) }
+    }
+    const mode = d.mode ?? 'updown'
     const span = (right - left) * d.width
-    if (span < 2) return
     let max = 0
-    for (let r = 0; r < p.up.length; r++) max = Math.max(max, p.up[r] + p.dn[r])
-    if (max <= 0) return
-    for (let r = 0; r < p.up.length; r++) {
-      const yTop = this.y(p.lo + (r + 1) * p.step)
-      const yBot = this.y(p.lo + r * p.step)
-      if (yTop == null || yBot == null) continue
-      const t = Math.min(yTop, yBot) + 0.5
-      const hh = Math.max(1, Math.abs(yBot - yTop) - 1)
-      const inVa = r >= p.val && r <= p.vah
-      const wu = (p.up[r] / max) * span
-      const wd = (p.dn[r] / max) * span
-      if (d.anchor === 'left') {
-        ctx.fillStyle = inVa ? d.vaUp : d.up
-        ctx.fillRect(left, t, wu, hh)
-        ctx.fillStyle = inVa ? d.vaDn : d.dn
-        ctx.fillRect(left + wu, t, wd, hh)
-      } else {
-        ctx.fillStyle = inVa ? d.vaUp : d.up
-        ctx.fillRect(right - wu, t, wu, hh)
-        ctx.fillStyle = inVa ? d.vaDn : d.dn
-        ctx.fillRect(right - wu - wd, t, wd, hh)
+    for (let r = 0; r < R; r++) max = Math.max(max, mode === 'delta' ? Math.abs(p.up[r] - p.dn[r]) : p.up[r] + p.dn[r])
+    if (d.hist !== false && span >= 2 && max > 0) {
+      for (let r = 0; r < R; r++) {
+        const yTop = this.y(p.lo + (r + 1) * p.step)
+        const yBot = this.y(p.lo + r * p.step)
+        if (yTop == null || yBot == null) continue
+        const t = Math.min(yTop, yBot) + 0.5
+        const hh = Math.max(1, Math.abs(yBot - yTop) - 1)
+        const inVa = r >= p.val && r <= p.vah
+        const u = p.up[r]
+        const dn = p.dn[r]
+        // 第一段 a、第二段 b（只有上涨/下跌模式才有）/ first segment a, second b (up/down mode only)
+        const a = mode === 'updown' ? u : mode === 'total' ? u + dn : Math.abs(u - dn)
+        const b = mode === 'updown' ? dn : 0
+        const cA = mode === 'delta' && dn > u ? (inVa ? d.vaDn : d.dn) : (inVa ? d.vaUp : d.up)
+        const wa = (a / max) * span
+        const wb = (b / max) * span
+        ctx.fillStyle = cA
+        if (d.anchor === 'left') ctx.fillRect(left, t, wa, hh)
+        else ctx.fillRect(right - wa, t, wa, hh)
+        if (wb > 0) {
+          ctx.fillStyle = inVa ? d.vaDn : d.dn
+          if (d.anchor === 'left') ctx.fillRect(left + wa, t, wb, hh)
+          else ctx.fillRect(right - wa - wb, t, wb, hh)
+        }
       }
     }
-    const yp = this.y(p.lo + (p.poc + 0.5) * p.step)
-    if (yp != null && d.poc) {
-      ctx.strokeStyle = d.poc
+    const hline = (price: number, color: string | undefined, dash: LineDash, extend?: boolean) => {
+      const y = this.y(price)
+      if (y == null || !color) return
+      ctx.strokeStyle = color
       ctx.lineWidth = 1
+      ctx.setLineDash(DASHES[dash])
       ctx.beginPath()
-      ctx.moveTo(left, Math.round(yp) + 0.5)
-      ctx.lineTo(right, Math.round(yp) + 0.5)
+      ctx.moveTo(left, Math.round(y) + 0.5)
+      ctx.lineTo(extend ? width : right, Math.round(y) + 0.5)
       ctx.stroke()
+      ctx.setLineDash([])
     }
+    hline(p.lo + (p.vah + 1) * p.step, d.vah, 'dotted', ext.vah)
+    hline(p.lo + p.val * p.step, d.val, 'dotted', ext.val)
+    hline(p.lo + (p.poc + 0.5) * p.step, d.poc, 'solid', ext.poc)
   }
 
   private visibleProfile(ctx: Ctx, vp: NonNullable<ShapeScene['vp']>, width: number) {

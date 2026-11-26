@@ -130,13 +130,14 @@ async function refreshLive(symbol: string, code: string, s: Series) {
  * Lower-timeframe bars in [t0, tEnd); tEnd = Infinity means up to the newest bar (anchored).
  * Null while not loaded or when no lower timeframe fits; the caller then uses chart bars.
  */
-export function intrabarBars(symbol: string, chartInterval: string, t0: number, tEnd: number, key: string): { code: string; bars: Candle[] } | null {
+export function intrabarBars(symbol: string, chartInterval: string, t0: number, tEnd: number, key: string, only?: string): { code: string; bars: Candle[] } | null {
   const chartSec = barSpacingSeconds(chartInterval)
   if (!symbol || !chartSec || !Number.isFinite(t0)) return null
   const nowSec = Date.now() / 1000
   const live = !Number.isFinite(tEnd) || tEnd > nowSec
   const end = live ? nowSec + chartSec : tEnd
-  for (const { code, sec } of intrabarLadder(chartSec, end - t0)) {
+  // only = 只用这一级（指标自己挑好了周期）/ only = use just this level (an indicator already chose it)
+  for (const { code, sec } of intrabarLadder(chartSec, end - t0).filter((x) => !only || x.code === only)) {
     const s = seriesOf(`${symbol}|${code}`)
     const span = s.spans.find((x) => x.a <= t0 && x.b >= (live ? Infinity : end))
     if (span && !span.ok) continue

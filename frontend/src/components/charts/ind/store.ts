@@ -240,7 +240,7 @@ export function addInstance(l: IndLayout, type: string, at?: { pane?: string }):
   // A second instance of a kind: give its first line another colour so they don't blend
   const same = l.list.filter((i) => i.type === type)
   const first = def.plots[0]
-  if (same.length > 0 && first && !first.colors && !styles[first.key]?.color) {
+  if (same.length > 0 && first && !first.colors && !first.shape && !styles[first.key]?.color) {
     const used = new Set(same.map((i) => i.styles[first.key]?.color ?? first.color))
     const c = CYCLE.find((x) => !used.has(x)) ?? CYCLE[same.length % CYCLE.length]
     styles[first.key] = { ...styles[first.key], color: c }
