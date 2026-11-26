@@ -550,6 +550,8 @@
       "textColor": "Màu chữ",
       "account": "Quy mô tài khoản",
       "riskPct": "Rủi ro %",
+      "followTicket": "Theo phiếu đặt lệnh",
+      "followTicketHint": "Khối lượng và số tiền theo số lot hoặc % rủi ro hiện tại trên phiếu đặt lệnh, quy đổi theo kích thước hợp đồng của mã này. Chỉ để tham khảo.",
       "qtyHint": "Khối lượng = quy mô tài khoản × rủi ro % ÷ khoảng cắt lỗ, quy đổi theo kích thước hợp đồng của mã này. Chỉ để tham khảo.",
       "brushCoords": "Nét bút vẽ không có tọa độ để chỉnh sửa.",
       "visHint": "Hiện hình vẽ này trên các khung thời gian:",

@@ -124,7 +124,32 @@ export interface OrderForm {
   orderId: string
   /** 成功提交后调用，下一单换新号 / call after a successful submit */
   rotateOrderId: () => void
+  /** 用图上多空仓位工具的入场 / 止损 / 止盈填表；按入场价离现价多远自动选市价 / 限价 / 止损单。
+   *  Fill from a long/short drawing; picks market / limit / stop from where the entry sits vs the market. */
+  applyDraft: (d: DraftFill) => void
 }
+
+export interface DraftFill { side: Side; price: number; sl: number | null; tp: number | null }
+
+// 入场价离现价在这个比例（或一个点差）以内就按市价下：画线时入场线通常就是拖在现价附近，
+// 差一两个价位挂一张单没有意义。/ Within this fraction of the market (or one spread) the entry
+// counts as "at market": the entry line is usually dropped near the price, and a pending order a
+// tick or two away serves no purpose.
+export const DRAFT_MARKET_TOL = 0.0003
+
+/** 多空仓位工具的入场价该用哪种单：BUY 低于 ask = 限价、高于 = 止损；SELL 反过来。
+ *  Which order type a drawing's entry needs: BUY below ask = limit, above = stop; SELL mirrored. */
+export function draftEntryType(isBuy: boolean, price: number, bid: number | null, ask: number | null): OrderEntryType {
+  const mkt = isBuy ? ask : bid
+  if (mkt == null || !(mkt > 0) || !Number.isFinite(price)) return 'MARKET'
+  const spread = ask != null && bid != null ? Math.abs(ask - bid) : 0
+  if (Math.abs(price - mkt) <= Math.max(spread, mkt * DRAFT_MARKET_TOL)) return 'MARKET'
+  const above = price > mkt
+  return isBuy ? (above ? 'STOP' : 'LIMIT') : (above ? 'LIMIT' : 'STOP')
+}
+
+// 价格写回输入框：去掉浮点尾巴 / a price for the input box, float noise trimmed
+const priceText = (v: number) => String(Number(v.toFixed(10)))
 
 export function useOrderForm({
   symbol, side, accounts, fallbackQuote, refPrice,
@@ -339,6 +364,17 @@ export function useOrderForm({
     setOrderId(orderIdRef.current)
   }
 
+  const applyDraft = (d: DraftFill) => {
+    const buy = d.side === 'BUY'
+    const type = draftEntryType(buy, d.price, bid, ask)
+    autoPrice.current = false
+    lastSide.current = buy
+    setEntryTypeState(type)
+    if (type !== 'MARKET') setPriceState(priceText(d.price))
+    setSl(d.sl != null ? priceText(d.sl) : '')
+    setTp(d.tp != null ? priceText(d.tp) : '')
+  }
+
   return {
     isBuy, accounts, hasAccounts: accounts.length > 0, login, selected, chooseLogin,
     symbolBlocked: accountLacksSymbol(selected, symbol),
@@ -348,6 +384,6 @@ export function useOrderForm({
     sizeMode, setSizeMode, riskPct, setRiskPct, riskNeedsSl, riskUnsupported, riskBelowMinLot,
     sl, tp, setSl, setTp, slNum, tpNum, slInvalid, slTooClose: slClose, tpInvalid, slTpInvalid: slInvalid || tpInvalid,
     estMargin, riskPreview,
-    orderId, rotateOrderId,
+    orderId, rotateOrderId, applyDraft,
   }
 }

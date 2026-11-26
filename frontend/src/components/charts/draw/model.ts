@@ -278,7 +278,8 @@ export const TOOL_HOTKEYS: Partial<Record<Tool, { code: string; shift?: boolean 
   brush: { code: 'KeyB', shift: true }, text: { code: 'KeyX', shift: true }, priceRange: { code: 'KeyM', shift: true },
 }
 
-export const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
+// 第一个是新画线的缺省色：品牌紫 / the first is the default for new drawings: brand violet
+export const COLORS = ['#a78bfa', '#22d3ee', '#2ee07e', '#ff4d67', '#f5c451']
 // 浮动栏 / 设置里的完整色板 / the full palette in the floating bar and settings
 export const PALETTE = [
   '#f8fafc', '#94a3b8', '#475569', '#0f172a',

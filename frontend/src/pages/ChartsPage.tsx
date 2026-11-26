@@ -96,7 +96,7 @@ import { useChartEngine, type ChartView, type IndView } from '../components/char
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
 import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
 import type { Order, Quote } from '../api/types'
-import type { Side } from '../components/order/useOrderForm'
+import type { Side, DraftFill } from '../components/order/useOrderForm'
 import {
   FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
   priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, INTERVALS,
@@ -794,7 +794,11 @@ export default function ChartsPage() {
   const timeFmt = useMemo(() => makeTimeFormatters(cprefs.timezone, ivKind, lang), [cprefs.timezone, ivKind, lang])
   // 画线层：轴标签 / 坐标页签的时间格式与画布底色 / drawing layer: time labels and canvas colours
   const drawFmtTime = useCallback((x: number) => timeFmt.crosshair(x as Time), [timeFmt])
-  const drawTheme = useMemo(() => ({ bg: palette.bg, text: palette.text }), [palette.bg, palette.text])
+  // 多空仓位 / 价格区间等画线的涨跌色跟用户的 K 线配色走 / drawings' up / down follow the user's candle colours
+  const drawTheme = useMemo(
+    () => ({ bg: palette.bg, text: palette.text, up: candleColors.up, down: candleColors.down }),
+    [palette.bg, palette.text, candleColors.up, candleColors.down],
+  )
   const watermark = cprefs.canvas.watermark && symbol ? `${symbol} · ${intervalLabel(interval)}` : null
   const view = useMemo<ChartView>(() => ({
     chartType: cprefs.chartType,
@@ -1160,6 +1164,26 @@ export default function ChartsPage() {
   }, [exactDigits])
   useFillSound(accountOrders, symbol, cprefs.trading.sound)
 
+  // 多空仓位工具的「下单」：把方向、入场、止损、止盈填进下单票并把票亮出来（桌面经典版右栏常驻；
+  // 专业版切到交易面板；手机打开下单抽屉）。全屏时票不可见，退回图上投影单。
+  // The long/short tool's order button: fill side / entry / SL / TP into the order ticket and bring it
+  // up (classic desktop: always-on right column; pro: switch to the trade panel; phone: open the trade
+  // sheet). In fullscreen the ticket is hidden, so fall back to the projected order on the chart.
+  const [ticketPrefill, setTicketPrefill] = useState<(DraftFill & { nonce: number }) | null>(null)
+  const clearTicketPrefill = useCallback(() => setTicketPrefill(null), [])
+  const drawToOrder = useCallback((o: { side: Side; price: number; sl: number; tp: number }) => {
+    if (isFullscreen) { openDraft(o.side, o.price, o.sl, o.tp); return }
+    const f = exactDigits != null ? Math.pow(10, exactDigits) : null
+    const r = (v: number) => (f != null ? Math.round(v * f) / f : v)
+    setTicketPrefill({ nonce: Date.now(), side: o.side, price: r(o.price), sl: r(o.sl), tp: r(o.tp) })
+    if (isDesktop) {
+      if (pro) updatePro({ widget: 'trade', focus: false })
+    } else {
+      setTradeSide(o.side)
+      setSheet('trade')
+    }
+  }, [isFullscreen, openDraft, exactDigits, isDesktop, pro, updatePro])
+
   // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
   // The ticket subscribes to its own quotes (per account + the symbol's site-wide one).
   const ticket = (initialSide?: Side) => (
@@ -1174,6 +1198,8 @@ export default function ChartsPage() {
       initialSide={initialSide}
       onPlace={onPlace}
       quotesDown={wsDisconnected}
+      prefill={ticketPrefill}
+      onPrefillUsed={clearTicketPrefill}
     />
   )
 
@@ -1430,7 +1456,7 @@ export default function ChartsPage() {
                 fmtTime={drawFmtTime}
                 theme={drawTheme}
                 onStateChange={bumpDraw}
-                onToOrder={(o) => openDraft(o.side, o.price, o.sl, o.tp)}
+                onToOrder={drawToOrder}
                 onAlert={(d) => openAlert({ drawing: d })}
               />
             )}

@@ -13,7 +13,7 @@ import type {
 import type { MainSeriesApi } from '../useChartEngine'
 import { type Drawing, visibleOn, isScreenAnchored } from './model'
 import { timeToX, barsBetween } from './coords'
-import type { Bar } from './paint'
+import { type Bar, type DrawTheme, ACCENT } from './paint'
 import { intrabarBars, subscribeIntrabar } from './intrabar'
 import { barSpacingSeconds } from '../chartConfig'
 import {
@@ -25,8 +25,9 @@ export interface DrawScene {
   fmtPrice: (p: number) => string
   fmtTime: (t: number) => string
   L: DrawLabels
-  theme: { bg: string; text: string }
+  theme: DrawTheme
   qty: (riskAmount: number, slDist: number, ref: number) => number | null
+  size?: (slDist: number, ref: number) => { q: number | null; risk: number | null }
   pips: (dp: number) => number | null
   interval: string
   // 成交量分布去取同品种的小周期 K 线 / volume profiles fetch this symbol's lower-timeframe bars
@@ -114,8 +115,8 @@ export class DrawingsPrimitive {
         else if (sel(d) && d.type !== 'brush' && d.type !== 'highlighter' && !isScreenAnchored(d.type)) {
           const seenT = new Set<number>(), seenP = new Set<number>()
           for (const pt of d.pts) {
-            if (!seenP.has(pt.p)) { seenP.add(pt.p); addP(pt.p, d.color) }
-            if (!seenT.has(pt.t)) { seenT.add(pt.t); addT(pt.t, d.color) }
+            if (!seenP.has(pt.p)) { seenP.add(pt.p); addP(pt.p, ACCENT) }
+            if (!seenT.has(pt.t)) { seenT.add(pt.t); addT(pt.t, ACCENT) }
           }
         }
       }
@@ -148,6 +149,7 @@ export class DrawingsPrimitive {
       bars: (t1, t2) => Math.abs(barsBetween(c, t1, t2)),
       pips: sc.pips,
       qty: sc.qty,
+      size: sc.size,
       L: sc.L,
       theme: sc.theme,
       touch: sc.touch,

@@ -5,7 +5,7 @@
 // in draw/tools.ts and one series primitive paints every drawing (draw/primitive.ts); this component
 // owns the interaction state machine, selection, undo, persistence and the floating bar / settings /
 // object tree UI.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, Logical, MouseEventParams } from 'lightweight-charts'
 import type { MainSeriesApi } from './useChartEngine'
@@ -16,6 +16,9 @@ import ConfirmModal from '../ConfirmModal'
 import { useBackToClose } from '../../utils/useBackToClose'
 import { isChartAlive } from './chartLifecycle'
 import { rawVolumeByRisk, toPips } from '../../api/utils'
+import { getTicketSizing, subscribeTicketSizing } from '../order/ticketSizing'
+import { defaultVolume } from '../order/orderMath'
+import { useLastVolume } from '../../utils/useLastVolume'
 import { CHART_PREFS_NS } from './useChartPrefs'
 import { registerBarTimes, xToTime, timeToX } from './draw/coords'
 import {
@@ -26,6 +29,7 @@ import {
 import { DrawingsPrimitive, type DrawScene, barsBetweenTimes, LASER_MS } from './draw/primitive'
 import { pickImageFile, compressImage } from './draw/image'
 import { anchorsOf, constrain45, inMarquee, dragHandle, type DrawLabels } from './draw/tools'
+import type { DrawTheme } from './draw/paint'
 import DrawFloatingBar from './draw/DrawFloatingBar'
 import DrawSettingsDialog, { type SettingsTab } from './draw/DrawSettingsDialog'
 import DrawObjectTree from './draw/DrawObjectTree'
@@ -102,7 +106,7 @@ interface Props {
   digits?: number
   interval?: string
   fmtTime?: (t: number) => string
-  theme?: { bg: string; text: string }
+  theme?: DrawTheme
   // 句柄上的状态提交后通知外部工具栏重渲染 / fires after the handle's state commits so toolbars re-render
   onStateChange?: () => void
   // 多空仓位工具「转为订单」：按它的入场 / 止损 / 止盈开一张图上投影单（阶段 3）
@@ -217,17 +221,39 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       return parts.join(' ') || `0${t('charts.draw.lbl.m')}`
     },
   }), [t])
+  // 多空仓位工具的手数 / 金额跟下单票的仓位走；下单票从没出现过时用用户上次自己定的手数。
+  // The long/short tool sizes from the order ticket; before any ticket has shown, the user's last lots.
+  const ticketSizing = useSyncExternalStore(subscribeTicketSizing, getTicketSizing)
+  const { lastVolume } = useLastVolume()
+  const size = useMemo(() => {
+    // 1 手在这段止损上亏多少：rawVolumeByRisk 对金额是线性的 / money lost per lot over this stop
+    const perLot = (dist: number, ref: number) => {
+      const v = rawVolumeByRisk(symbol, 100, 100, dist, ref)
+      return v != null && v > 0 ? 100 / v : null
+    }
+    const sz = ticketSizing ?? { mode: 'lots' as const, lots: parseFloat(defaultVolume(lastVolume, symbol)) }
+    return (dist: number, ref: number): { q: number | null; risk: number | null } => {
+      const pl = perLot(dist, ref)
+      if (sz.mode === 'risk' && sz.equity != null && sz.equity > 0) {
+        const risk = sz.equity * sz.pct / 100
+        return { q: pl != null ? risk / pl : null, risk }
+      }
+      const q = sz.lots != null && sz.lots > 0 ? sz.lots : null
+      return { q, risk: q != null && pl != null ? q * pl : null }
+    }
+  }, [ticketSizing, lastVolume, symbol])
   const scene = useMemo<DrawScene>(() => ({
     fmtPrice,
     fmtTime: fmtTime ?? ((x: number) => new Date(x * 1000).toISOString().slice(0, 16).replace('T', ' ')),
     L: labels,
     theme: theme ?? { bg: '#09090b', text: '#94a3b8' },
     qty: (riskAmt, sl, refP) => rawVolumeByRisk(symbol, riskAmt, 100, sl, refP),
+    size,
     pips: (dp) => toPips(symbol, dp),
     interval,
     symbol,
     touch: isTouchDevice,
-  }), [fmtPrice, fmtTime, labels, theme, symbol, interval])
+  }), [fmtPrice, fmtTime, labels, theme, symbol, interval, size])
   const sceneRef = useRef(scene)
   sceneRef.current = scene
 

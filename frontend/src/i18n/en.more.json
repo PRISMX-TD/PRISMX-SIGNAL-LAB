@@ -550,6 +550,8 @@
       "textColor": "Text colour",
       "account": "Account size",
       "riskPct": "Risk %",
+      "followTicket": "Follow order ticket",
+      "followTicketHint": "Quantity and amounts follow the order ticket's current lots or risk %, converted with this symbol's contract size. For reference only.",
       "qtyHint": "Quantity = account size × risk % ÷ stop distance, using this symbol's contract size. For reference only.",
       "brushCoords": "A brush stroke has no editable coordinates.",
       "visHint": "Show this drawing on these intervals:",

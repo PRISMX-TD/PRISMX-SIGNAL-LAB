@@ -7,7 +7,7 @@ import {
   DEFAULT_ACCOUNT, DEFAULT_RISK, pointsNeeded, isScreenAnchored,
 } from './model'
 import {
-  type Px, type DrawEnv, UP, DOWN, FONT, tolOf, ok, distToSeg, extendSeg, setDash, withAlpha, stroke, labelBox,
+  type Px, type DrawEnv, upOf, downOf, textOn, FONT, tolOf, ok, distToSeg, extendSeg, setDash, withAlpha, stroke, labelBox,
   arrowHead, lineText, pct, signed, textWidth, pointInPoly,
 } from './paint'
 import { EXT } from './ext'
@@ -19,7 +19,7 @@ const BATCH1: Record<string, true> = Object.fromEntries(([
   'trend', 'ray', 'info', 'extended', 'angle', 'hline', 'hray', 'vline', 'crossline', 'channel', 'fib', 'fibExt',
   'long', 'short', 'priceRange', 'dateRange', 'datePriceRange', 'brush', 'arrow', 'rect', 'text', 'priceLabel',
 ] as DrawType[]).map((t) => [t, true]))
-export { UP, DOWN, tolOf, handleROf, distToSeg, extendSeg, labelBox } from './paint'
+export { UP, DOWN, ACCENT, tolOf, handleROf, distToSeg, extendSeg, labelBox } from './paint'
 
 export function anchorsOf(d: Drawing, env: DrawEnv): Px[] {
   if (isScreenAnchored(d.type)) return d.pts.map((pt) => ({ x: pt.t * env.w, y: pt.p * env.h }))
@@ -185,24 +185,37 @@ export function renderDrawing(ctx: CanvasRenderingContext2D, d: Drawing, px: Px[
       const xL = Math.min(px[0].x, px[1].x), xR = Math.max(px[0].x, px[1].x, xL + 1)
       const [e, tg, st] = [d.pts[0].p, d.pts[1].p, d.pts[2].p]
       const yE = px[0].y, yT = px[1].y, yS = px[2].y
+      // 止盈区用用户的「涨」色、止损区用「跌」色：红涨绿跌的用户看到的盈利区也是红的。
+      // Target zone in the user's "up" colour, stop zone in "down": red-up users see a red profit zone.
+      const UPC = upOf(env), DNC = downOf(env)
       if (fillOf(d)) {
-        ctx.fillStyle = withAlpha(UP, 0.16); ctx.fillRect(xL, Math.min(yE, yT), xR - xL, Math.abs(yT - yE))
-        ctx.fillStyle = withAlpha(DOWN, 0.16); ctx.fillRect(xL, Math.min(yE, yS), xR - xL, Math.abs(yS - yE))
+        ctx.fillStyle = withAlpha(UPC, 0.16); ctx.fillRect(xL, Math.min(yE, yT), xR - xL, Math.abs(yT - yE))
+        ctx.fillStyle = withAlpha(DNC, 0.16); ctx.fillRect(xL, Math.min(yE, yS), xR - xL, Math.abs(yS - yE))
       }
       ctx.setLineDash([]); ctx.lineWidth = 1
-      ctx.strokeStyle = UP; ctx.beginPath(); ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.stroke()
-      ctx.strokeStyle = DOWN; ctx.beginPath(); ctx.moveTo(xL, yS); ctx.lineTo(xR, yS); ctx.stroke()
+      ctx.strokeStyle = UPC; ctx.beginPath(); ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.stroke()
+      ctx.strokeStyle = DNC; ctx.beginPath(); ctx.moveTo(xL, yS); ctx.lineTo(xR, yS); ctx.stroke()
       ctx.strokeStyle = env.theme.text; ctx.beginPath(); ctx.moveTo(xL, yE); ctx.lineTo(xR, yE); ctx.stroke()
       if (showLabelOf(d)) {
-        const acc = d.account ?? DEFAULT_ACCOUNT, risk = d.risk ?? DEFAULT_RISK
-        const riskAmt = acc * risk / 100
         const slDist = Math.abs(e - st), tpDist = Math.abs(tg - e)
         const rr = slDist > 0 ? tpDist / slDist : 0
-        const q = env.qty(riskAmt, slDist, e)
+        // 手数与金额：画线设置里填过账户规模 / 风险 % 就按它；否则跟下单票的仓位（手数或风险 %）走，
+        // 金额按该品种的合约大小和入场价折算。
+        // Lots and money: the drawing's own account size / risk % when the user set them, otherwise the
+        // order ticket's sizing (lots or risk %), converted with the symbol's contract size at the entry.
+        let riskAmt: number | null, q: number | null
+        if (d.account != null || d.risk != null || !env.size) {
+          riskAmt = (d.account ?? DEFAULT_ACCOUNT) * (d.risk ?? DEFAULT_RISK) / 100
+          q = env.qty(riskAmt, slDist, e)
+        } else {
+          const s = env.size(slDist, e)
+          riskAmt = s.risk; q = s.q
+        }
+        const money = (v: number | null, sign: string) => (v != null && Number.isFinite(v) ? `  ${sign}${v.toFixed(2)}` : '')
         const pipsT = env.pips(tpDist), pipsS = env.pips(slDist)
         const cx = (xL + xR) / 2
-        labelBox(ctx, [`${env.L.target}: ${env.fmtPrice(tg)} (${Math.abs(pct(e, tg)).toFixed(2)}%)${pipsT != null ? ` ${pipsT.toFixed(1)} ${env.L.pips}` : ''}  +${(riskAmt * rr).toFixed(2)}`], cx, yT, withAlpha(UP, 0.9), '#04130a', yT < yE ? 'above' : 'below')
-        labelBox(ctx, [`${env.L.stop}: ${env.fmtPrice(st)} (${Math.abs(pct(e, st)).toFixed(2)}%)${pipsS != null ? ` ${pipsS.toFixed(1)} ${env.L.pips}` : ''}  −${riskAmt.toFixed(2)}`], cx, yS, withAlpha(DOWN, 0.9), '#1a0508', yS < yE ? 'above' : 'below')
+        labelBox(ctx, [`${env.L.target}: ${env.fmtPrice(tg)} (${Math.abs(pct(e, tg)).toFixed(2)}%)${pipsT != null ? ` ${pipsT.toFixed(1)} ${env.L.pips}` : ''}${money(riskAmt != null ? riskAmt * rr : null, '+')}`], cx, yT, withAlpha(UPC, 0.9), textOn(UPC), yT < yE ? 'above' : 'below')
+        labelBox(ctx, [`${env.L.stop}: ${env.fmtPrice(st)} (${Math.abs(pct(e, st)).toFixed(2)}%)${pipsS != null ? ` ${pipsS.toFixed(1)} ${env.L.pips}` : ''}${money(riskAmt, '−')}`], cx, yS, withAlpha(DNC, 0.9), textOn(DNC), yS < yE ? 'above' : 'below')
         labelBox(ctx, [`${env.L.rr}: ${rr.toFixed(2)}${q != null ? `  ${env.L.qty}: ${q.toFixed(2)}` : ''}`], cx, yE, lbg, lfg)
       }
       break
@@ -212,7 +225,7 @@ export function renderDrawing(ctx: CanvasRenderingContext2D, d: Drawing, px: Px[
       const y1 = Math.min(px[0].y, px[1].y), y2 = Math.max(px[0].y, px[1].y)
       const [a, b] = d.pts
       const dp = b.p - a.p
-      const col = d.type === 'dateRange' ? d.color : dp >= 0 ? UP : DOWN
+      const col = d.type === 'dateRange' ? d.color : dp >= 0 ? upOf(env) : downOf(env)
       const c = d.type === 'priceRange' ? d.color : col
       if (fillOf(d)) { ctx.fillStyle = withAlpha(c, 0.12); ctx.fillRect(x1, y1, x2 - x1, y2 - y1) }
       ctx.lineWidth = lw; ctx.strokeStyle = c; ctx.setLineDash([])

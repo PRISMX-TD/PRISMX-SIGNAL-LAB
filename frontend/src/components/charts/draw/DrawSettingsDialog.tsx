@@ -248,13 +248,25 @@ export default function DrawSettingsDialog(p: Props) {
         )
       case 'inputs':
         if (isVp) return <VpInputs d={d} set={set} tt={tt} />
-        return (
-          <>
-            <Row label={tt('charts.draw.account')}><Num value={d.account ?? DEFAULT_ACCOUNT} min={1} max={1e12} label={tt('charts.draw.account')} width={120} onChange={(v) => set({ account: v })} /></Row>
-            <Row label={tt('charts.draw.riskPct')}><Num value={d.risk ?? DEFAULT_RISK} min={0.01} max={100} label={tt('charts.draw.riskPct')} onChange={(v) => set({ risk: v })} /></Row>
-            <small>{tt('charts.draw.qtyHint')}</small>
-          </>
-        )
+        {
+          // 缺省跟下单票的手数 / 风险 %；关掉后用这里自己填的账户规模和风险 %。
+          // Follows the order ticket's lots / risk % by default; off = this drawing's own account size and risk %.
+          const follow = d.account == null && d.risk == null
+          return (
+            <>
+              <Row label={tt('charts.draw.followTicket')}>
+                <Switch checked={follow} onChange={(v) => set(v ? { account: undefined, risk: undefined } : { account: DEFAULT_ACCOUNT, risk: DEFAULT_RISK })} aria-label={tt('charts.draw.followTicket')} />
+              </Row>
+              {!follow && (
+                <>
+                  <Row label={tt('charts.draw.account')}><Num value={d.account ?? DEFAULT_ACCOUNT} min={1} max={1e12} label={tt('charts.draw.account')} width={120} onChange={(v) => set({ account: v })} /></Row>
+                  <Row label={tt('charts.draw.riskPct')}><Num value={d.risk ?? DEFAULT_RISK} min={0.01} max={100} label={tt('charts.draw.riskPct')} onChange={(v) => set({ risk: v })} /></Row>
+                </>
+              )}
+              <small>{tt(follow ? 'charts.draw.followTicketHint' : 'charts.draw.qtyHint')}</small>
+            </>
+          )
+        }
       case 'coords':
         return (
           <>

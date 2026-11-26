@@ -18,7 +18,8 @@ import type { MT5Account, Order, OrderEntryType } from '../../api/types'
 import { useGlobalQuote } from '../../store/live'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
-import { useOrderForm, type Side } from '../order/useOrderForm'
+import { useOrderForm, type Side, type DraftFill } from '../order/useOrderForm'
+import { setTicketSizing } from '../order/ticketSizing'
 import { useMarketClosedText, useMarketStatus } from '../order/useMarketStatus'
 import { announce } from '../../utils/announce'
 import { EMPTY } from '../../utils/format'
@@ -52,6 +53,10 @@ interface Props {
   // WebSocket lost: read from useLive by ChartsPage (this memo'd component doesn't subscribe to the whole live context).
   quotesDown?: boolean
   className?: string
+  // 图上多空仓位工具点「下单」带过来的方向 / 入场 / 止损 / 止盈；nonce 变了才应用一次，应用完调 onPrefillUsed。
+  // Side / entry / SL / TP from a long/short drawing's order button; applied once per nonce, then onPrefillUsed.
+  prefill?: (DraftFill & { nonce: number }) | null
+  onPrefillUsed?: () => void
 }
 
 // 等回执期间按钮上跑的秒数，单独成一个叶子组件：每 100ms 只重渲染这一个 <span>。
@@ -84,6 +89,7 @@ function PipPrice({ v, digits }: { v: number | null; digits: number }) {
 
 function OrderTicket({
   symbol, accounts, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', quotesDown = false, className = '',
+  prefill = null, onPrefillUsed,
 }: Props) {
   const { t } = useTranslation()
   // 按交易商账户区分的报价（下单参考价用选中账户的）由 useOrderForm 按选中账户、按品种
@@ -107,6 +113,28 @@ function OrderTicket({
     onLoginChange: onSelectLogin,
   })
   const { isBuy, selected } = form
+
+  // 把这张票的仓位（手数或风险 %）告诉图上的多空仓位工具 / tell the chart's long/short tool this ticket's sizing
+  useEffect(() => {
+    if (form.sizeMode === 'risk') {
+      const pct = parseFloat(form.riskPct)
+      setTicketSizing({ mode: 'risk', pct: pct > 0 ? pct : 0, equity: selected?.equity ?? null, lots: form.parsedVolume })
+    } else if (form.parsedVolume != null) {
+      setTicketSizing({ mode: 'lots', lots: form.parsedVolume })
+    }
+  }, [form.sizeMode, form.riskPct, form.parsedVolume, selected?.equity])
+
+  // 图上画线点「下单」：换方向、填止损止盈，入场价按离现价远近自动选市价 / 挂单
+  // A drawing's order button: switch side, fill SL / TP, pick market vs pending from the entry
+  const appliedNonce = useRef<number | null>(null)
+  useEffect(() => {
+    if (!prefill || appliedNonce.current === prefill.nonce) return
+    appliedNonce.current = prefill.nonce
+    setSide(prefill.side)
+    form.applyDraft(prefill)
+    onPrefillUsed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per nonce
+  }, [prefill?.nonce])
   const [submitting, setSubmitting] = useState(false)
   // 本次提交发出的时刻；等回执期间按钮上跑秒 / when this submit went out; the CTA ticks while waiting
   const [sentAt, setSentAt] = useState<number | null>(null)
