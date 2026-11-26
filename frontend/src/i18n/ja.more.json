@@ -857,6 +857,8 @@
       "candleColors": "ローソク足の色",
       "greenUp": "緑高・赤安",
       "redUp": "赤高・緑安",
+      "dirColors": "騰落の表示色",
+      "dirColorsHint": "現在値ラベル・足の残り時間・騰落率はこの赤緑で表示し、上のカスタム色には従いません",
       "upColor": "陽線",
       "downColor": "陰線",
       "custom": "カスタム"

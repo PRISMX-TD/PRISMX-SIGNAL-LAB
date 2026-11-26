@@ -250,11 +250,13 @@ export { DOWN_COLOR, UP_COLOR }
 // a custom pair, stored in the charts.candleColors pref. Only candles and volume
 // bars follow it; the on-chart SL (red) / TP (green) lines carry stop/target
 // semantics and stay fixed.
-export interface CandleColors { up: string; down: string }
+// dir：自选 K 线颜色时，现价标签 / 倒计时 / 涨跌幅这些「涨跌提示」用哪套红绿（见 dirColorsOf）。
+// dir: with custom candle colours, which red/green pair the up/down cues use (see dirColorsOf).
+export interface CandleColors { up: string; down: string; dir?: CandleScheme }
 export const CANDLE_SCHEMES = {
   greenUp: { up: UP_COLOR, down: DOWN_COLOR },
   redUp: { up: DOWN_COLOR, down: UP_COLOR },
-} as const satisfies Record<string, CandleColors>
+} as const satisfies Record<string, { up: string; down: string }>
 export type CandleScheme = keyof typeof CANDLE_SCHEMES
 export const DEFAULT_CANDLE_COLORS: CandleColors = CANDLE_SCHEMES.greenUp
 // 自选颜色的色板：几档绿、几档红，再加几个中性 / 冷色，给不想要红绿的人。
@@ -271,10 +273,51 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/
 // Validate what comes back from the cloud; anything malformed falls back to the default.
 export function normalizeCandleColors(raw: unknown): CandleColors {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<'up' | 'down', unknown>>
-  return {
+  const out: CandleColors = {
     up: typeof r.up === 'string' && HEX_RE.test(r.up) ? r.up : DEFAULT_CANDLE_COLORS.up,
     down: typeof r.down === 'string' && HEX_RE.test(r.down) ? r.down : DEFAULT_CANDLE_COLORS.down,
   }
+  const dir = (raw && typeof raw === 'object' ? (raw as { dir?: unknown }).dir : undefined)
+  if (dir === 'greenUp' || dir === 'redUp') out.dir = dir
+  return out
+}
+
+// 偏红：色相落在红色一段、且不是灰 / reddish: hue in the red band and not a grey
+function isReddish(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16)
+  const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  if (max - min < 0.25 || max !== r) return false
+  const hue = (((g - b) / (max - min)) * 60 + 360) % 360
+  return hue <= 30 || hue >= 330
+}
+
+// 涨跌提示用哪套红绿：选了预设就跟预设；自选颜色看用户另选的 dir；都没有就按涨色猜（涨色偏红 = 红涨绿跌）。
+// Which red/green pair the up/down cues use: a preset follows itself; custom colours use the
+// user's dir; failing that, guess from the up colour (a reddish up colour = red-up).
+export function dirSchemeOf(c: CandleColors): CandleScheme {
+  const s = candleSchemeOf(c)
+  if (s !== 'custom') return s
+  if (c.dir) return c.dir
+  return isReddish(c.up) && !isReddish(c.down) ? 'redUp' : 'greenUp'
+}
+
+// 价格涨跌的提示色（现价标签、收线倒计时、图例涨跌、测量）：永远是红 / 绿，不跟自选的 K 线颜色走——
+// 用户把 K 线改成黑白后，现价标签不该也变成白的看不出涨跌。
+// Up/down cue colours (last-price label, bar countdown, legend change, measure): always red /
+// green, never the custom candle colours — black-and-white candles must not turn the last-price
+// label white and hide the direction.
+export function dirColorsOf(c: CandleColors): { up: string; down: string } {
+  return CANDLE_SCHEMES[dirSchemeOf(c)]
+}
+
+// 色块上的字用深还是浅 / dark or light text on a colour chip
+export function textOnColor(hex: string): string {
+  const n = parseInt(hex.replace('#', '').slice(0, 6), 16)
+  if (!Number.isFinite(n)) return '#ffffff'
+  const lin = (v: number) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4) }
+  const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return L > 0.4 ? '#0b0b0f' : '#ffffff'
 }
 
 // 当前颜色对应哪套预设；都不是就是自选 / which preset the pair matches, or 'custom'

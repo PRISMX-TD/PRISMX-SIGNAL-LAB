@@ -857,6 +857,8 @@
       "candleColors": "Màu nến",
       "greenUp": "Xanh tăng · Đỏ giảm",
       "redUp": "Đỏ tăng · Xanh giảm",
+      "dirColors": "Màu báo tăng/giảm",
+      "dirColorsHint": "Nhãn giá hiện tại, đếm ngược nến và % thay đổi dùng cặp đỏ/xanh này, không theo màu nến tùy chỉnh ở trên",
       "upColor": "Tăng",
       "downColor": "Giảm",
       "custom": "Tùy chỉnh"

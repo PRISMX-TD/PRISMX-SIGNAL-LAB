@@ -83,6 +83,7 @@ import ShortcutsDialog from '../components/charts/ShortcutsDialog'
 import QuickInput from '../components/charts/QuickInput'
 import ChartPriceLines from '../components/charts/ChartPriceLines'
 import MeasureOverlay from '../components/charts/MeasureOverlay'
+import ChartLoupe from '../components/charts/ChartLoupe'
 import BackToLatest from '../components/charts/BackToLatest'
 import ChartContextMenu, { type CtxState } from '../components/charts/ChartContextMenu'
 import { SessionBreaks } from '../components/charts/sessionBreaks'
@@ -102,7 +103,7 @@ import { draftEntryType, type Side, type DraftFill } from '../components/order/u
 import {
   FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
   priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, INTERVALS,
-  normalizeCandleColors, type CandleColors,
+  normalizeCandleColors, dirColorsOf, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
 import { isAppHidden } from '../utils/appVisibility'
@@ -750,6 +751,9 @@ export default function ChartsPage() {
   const changeCandleColors = useCallback((c: CandleColors) => {
     setCandleColorsState(c)
   }, [])
+  // 涨跌提示色：现价标签 / 倒计时 / 图例涨跌 / 测量用红绿，不跟自选的 K 线颜色（见 dirColorsOf）
+  // Up/down cue colours for the countdown / legend change / measure: red/green, not custom candle colours
+  const dirColors = useMemo(() => dirColorsOf(candleColors), [candleColors])
 
   // Pro 专属指标（MA 趋势蜡烛）：保存的开关原样保留（续费后自动恢复），但只有当前是 Pro
   // 才真正画出来。会员到期由后端降级 plan，这里进页面刷新一次、之后每 5 分钟刷新一次，
@@ -1486,7 +1490,7 @@ export default function ChartsPage() {
                 series={seriesRef.current}
                 interval={interval}
                 candlesRef={engine.candlesRef}
-                colors={candleColors}
+                colors={dirColors}
                 stale={stale}
               />
             )}
@@ -1511,7 +1515,7 @@ export default function ChartsPage() {
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
 
             {/* 主图状态行：品种 · 周期 · OHLC · 涨跌 / main status line */}
-            <ChartLegend store={engine.ohlcStore} symbol={symbol} interval={interval} chartType={cprefs.chartType} decimals={decimals} legend={cprefs.legend} colors={candleColors} />
+            <ChartLegend store={engine.ohlcStore} symbol={symbol} interval={interval} chartType={cprefs.chartType} decimals={decimals} legend={cprefs.legend} colors={dirColors} />
             {/* 买卖按钮（桌面，或手机全屏横屏时）/ buy & sell buttons (desktop, or phone fullscreen) */}
             {showTradeBtns && (
               <TradeButtons symbol={symbol} digits={decimals} login={tradeLogin} oneClick={cprefs.trading.oneClick} touch={!isDesktop} onPlace={chartPlace} quotesDown={wsDisconnected} />
@@ -1548,8 +1552,10 @@ export default function ChartsPage() {
               />
             )}
             {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
-              <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={candleColors} />
+              <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={dirColors} />
             )}
+            {/* 触屏拖动画线点 / 止盈止损线时的放大镜 / loupe while touch-dragging drawing points and SL/TP lines */}
+            {drawReady && <ChartLoupe />}
             {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
             {zoomOn && drawReady && (
               <ProZoomBox

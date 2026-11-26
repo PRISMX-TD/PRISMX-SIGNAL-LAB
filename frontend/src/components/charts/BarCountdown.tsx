@@ -20,7 +20,7 @@ import type { IChartApi } from 'lightweight-charts'
 import type { MainSeriesApi } from './useChartEngine'
 import type { Candle } from '../../api/types'
 import { serverNowMs } from '../../utils/serverClock'
-import { barCloseCountdownSec, fmtCountdown, type CandleColors } from './chartConfig'
+import { barCloseCountdownSec, fmtCountdown, textOnColor } from './chartConfig'
 import { isChartAlive } from './chartLifecycle'
 
 const TICK_MS = 250
@@ -33,7 +33,8 @@ interface Props {
   series: MainSeriesApi
   interval: string
   candlesRef: { current: Candle[] }
-  colors: CandleColors
+  // 涨跌提示色（dirColorsOf），不是自选的 K 线颜色 / up/down cue colours, not custom candle colours
+  colors: { up: string; down: string }
   stale: boolean
 }
 
@@ -73,7 +74,7 @@ export default function BarCountdown({ chart, series, interval, candlesRef, colo
       if (top !== lastTop) { el.style.transform = `translateY(${top}px)`; lastTop = top }
       if (scaleW !== lastWidth) { el.style.width = `${scaleW}px`; lastWidth = scaleW }
       const bg = last.c >= last.o ? colors.up : colors.down
-      if (bg !== lastBg) { el.style.background = bg; lastBg = bg }
+      if (bg !== lastBg) { el.style.background = bg; el.style.color = textOnColor(bg); lastBg = bg }
       if (!shown) { el.style.display = 'block'; shown = true }
     }
     tick()

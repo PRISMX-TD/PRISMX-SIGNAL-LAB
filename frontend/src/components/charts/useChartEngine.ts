@@ -43,7 +43,7 @@ import {
 import type { Candle } from '../../api/types'
 import { markChartDisposed } from './chartLifecycle'
 import { ZonePrimitive, type BarStrip, type ZoneRect } from './zonePrimitive'
-import { EMPTY_LEGEND, type CandleColors, type LegendValues } from './chartConfig'
+import { EMPTY_LEGEND, dirColorsOf, type CandleColors, type LegendValues } from './chartConfig'
 import { createLegendStore } from './legendStore'
 import { createOhlcStore } from './ohlcStore'
 import { MainSeriesView, isCloseOnlyStyle, type MainBar, type MainSeriesOptions, type MainStyle } from './mainSeries'
@@ -213,9 +213,13 @@ export function useChartEngine(
   const lastFullRenderRef = useRef(0)
   const fullRenderTimerRef = useRef<number | undefined>(undefined)
 
+  // 每根 bar 的 color 只用来给价格轴上的最新价标签 / 最新价线上色（K 线本身按序列选项画）：
+  // 用涨跌提示色，不用自选的 K 线颜色（见 dirColorsOf）。
+  // A bar's color only paints the last-price label / line on the axis (candles draw from the series
+  // options): use the up/down cue colours, not the custom candle colours (see dirColorsOf).
   const colorOf = useCallback((o: number, c: number, dir?: 1 | -1): string => {
     const v = viewRef.current
-    const cc = candleColorsRef.current
+    const cc = dirColorsOf(candleColorsRef.current)
     if (v && isCloseOnlyStyle(styleOf(v.chartType)) && v.chartType !== 'baseline' && v.chartType !== 'columns') return v.lineColor
     const up = dir != null ? dir > 0 : c >= o
     return up ? cc.up : cc.down

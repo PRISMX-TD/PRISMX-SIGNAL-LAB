@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import ChartDialog from './ChartDialog'
 import Switch from '../Switch'
 import ColorPicker from './ind/ColorPicker'
-import { CANDLE_COLOR_PRESETS, CANDLE_SCHEMES, candleSchemeOf, type CandleColors, type CandleScheme } from './chartConfig'
+import { CANDLE_COLOR_PRESETS, CANDLE_SCHEMES, candleSchemeOf, dirSchemeOf, type CandleColors, type CandleScheme } from './chartConfig'
 import { COLOR_PRESETS } from './indicatorSettings'
 import { PRICE_BASED_TYPES, templateOf, type ChartPrefs, type GridMode, type ScaleMode } from './chartPrefs'
 import type { ChartPrefsUpdate } from './useChartPrefs'
@@ -101,7 +101,7 @@ export default function ChartSettingsDialog(p: Props) {
                 value={scheme}
                 label={tt('charts.settings.candleColors')}
                 options={[{ v: 'greenUp', label: tt('charts.settings.greenUp') }, { v: 'redUp', label: tt('charts.settings.redUp') }]}
-                onChange={(v) => { if (v !== 'custom') p.onCandleColors({ ...CANDLE_SCHEMES[v] }) }}
+                onChange={(v) => { if (v !== 'custom') p.onCandleColors({ ...CANDLE_SCHEMES[v], dir: v }) }}
               />
               <div className="chart-set-custom">
                 <span className="chart-set-pick">
@@ -115,6 +115,18 @@ export default function ChartSettingsDialog(p: Props) {
                 {scheme === 'custom' && <em>{tt('charts.settings.custom')}</em>}
               </div>
             </div>
+            {/* 自选 K 线颜色时另选涨跌提示色（现价标签、倒计时、涨跌幅）；预设时它就跟预设 */}
+            {/* With custom candle colours, pick the up/down cue pair separately; presets imply it */}
+            {scheme === 'custom' && (
+              <Row label={tt('charts.settings.dirColors')} hint={tt('charts.settings.dirColorsHint')}>
+                <Seg<CandleScheme>
+                  value={dirSchemeOf(p.candleColors)}
+                  label={tt('charts.settings.dirColors')}
+                  options={[{ v: 'greenUp', label: tt('charts.settings.greenUp') }, { v: 'redUp', label: tt('charts.settings.redUp') }]}
+                  onChange={(v) => p.onCandleColors({ ...p.candleColors, dir: v })}
+                />
+              </Row>
+            )}
             <Row label={tt('charts.cs.body')}><Switch checked={prefs.candle.body} onChange={(v) => set('candle', { ...prefs.candle, body: v })} aria-label={tt('charts.cs.body')} /></Row>
             <Row label={tt('charts.cs.borders')}><Switch checked={prefs.candle.borders} onChange={(v) => set('candle', { ...prefs.candle, borders: v })} aria-label={tt('charts.cs.borders')} /></Row>
             <Row label={tt('charts.cs.wick')}><Switch checked={prefs.candle.wick} onChange={(v) => set('candle', { ...prefs.candle, wick: v })} aria-label={tt('charts.cs.wick')} /></Row>

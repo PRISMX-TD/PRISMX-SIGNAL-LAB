@@ -53,6 +53,7 @@ import { useTradeActions, type ChartPlace } from './trade/useTradeActions'
 import DraftTicket, { type Draft } from './trade/DraftTicket'
 import ClosePopover from './trade/ClosePopover'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { hideLoupe, showLoupe } from './ChartLoupe'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
 const isTouchDevice = typeof window !== 'undefined'
@@ -1219,6 +1220,9 @@ export default function PositionOverlay({
     beginDrag(e, h.key, h.price, y, null)
   }, [beginDrag, hitBtn, hitLine, staged, unstage])
 
+  // 卸载时收起放大镜 / the loupe closes on unmount
+  useEffect(() => () => hideLoupe(), [])
+
   const restoreScroll = useCallback(() => {
     const before = scrollBeforeDragRef.current
     scrollBeforeDragRef.current = null
@@ -1229,6 +1233,7 @@ export default function PositionOverlay({
   const endDrag = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     dragRef.current = null
+    hideLoupe()
     if (overlayRef.current?.hasPointerCapture?.(e.pointerId)) overlayRef.current.releasePointerCapture(e.pointerId)
     restoreScroll()
     setDragKey(null)
@@ -1241,18 +1246,22 @@ export default function PositionOverlay({
     if (!drag || e.pointerId !== drag.pointerId) return
     const el = overlayRef.current
     if (!el) return
-    const rawY = e.clientY - el.getBoundingClientRect().top
+    const top = el.getBoundingClientRect().top
+    const rawY = e.clientY - top
     if (!drag.active) {
       if (Math.abs(rawY - drag.startY) < drag.slop) return
       drag.active = true
       setDragKey(drag.key)
       setHoveredBtn(null)
     }
-    const price = series.coordinateToPrice(clampY(rawY + drag.grab)) as number | null
+    const lineY = clampY(rawY + drag.grab)
+    const price = series.coordinateToPrice(lineY) as number | null
     if (price == null) return
     drag.price = price
     setDragPrice(price)
-  }, [clampY, series])
+    // 触屏：线在手指底下，放大镜里看它落在哪 / touch: the line is under the finger, the loupe shows where it lands
+    if (isTouchLike(e.pointerType)) showLoupe(chart, e.clientX, top + lineY)
+  }, [clampY, series, chart])
 
   const onUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     // 按钮：按下和抬起都在同一颗上才算点击 / a button click needs press and release on the same one

@@ -857,6 +857,8 @@
       "candleColors": "Candle colors",
       "greenUp": "Green up · Red down",
       "redUp": "Red up · Green down",
+      "dirColors": "Up/down cue colors",
+      "dirColorsHint": "Last-price label, bar countdown and change use this red/green pair, not the custom candle colors above",
       "upColor": "Up",
       "downColor": "Down",
       "custom": "Custom"

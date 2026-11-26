@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BOUNDARY_SETTLE_MS, CANDLE_SCHEMES, DRAG_LOCK_SCROLL, scrollAfterDrag, DEFAULT_CANDLE_COLORS, POLL_MS, POLL_SLOW_MS, barCloseCountdownSec, barSpacingSeconds,
   candleSchemeOf, fmtCountdown, intervalSeconds, nextBoundaryPollDelayMs, normalizeCandleColors,
-  INTERVALS, isKnownInterval,
+  INTERVALS, isKnownInterval, dirColorsOf, dirSchemeOf, textOnColor,
 } from './chartConfig'
 
 describe('chart poll cadence', () => {
@@ -162,5 +162,30 @@ describe('scrollAfterDrag（拖线后恢复图表拖动，踩坑 #221）', () =>
 
   it('锁定期间三种拖动都关、不碰滚轮', () => {
     expect(DRAG_LOCK_SCROLL).toEqual({ pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false })
+  })
+})
+
+// 涨跌提示色不跟自选的 K 线颜色 / up/down cues ignore custom candle colours
+describe('dirColorsOf', () => {
+  it('presets follow themselves', () => {
+    expect(dirColorsOf({ ...CANDLE_SCHEMES.redUp })).toEqual(CANDLE_SCHEMES.redUp)
+    expect(dirColorsOf({ ...CANDLE_SCHEMES.greenUp })).toEqual(CANDLE_SCHEMES.greenUp)
+  })
+  it('black-and-white candles still get red/green cues', () => {
+    expect(dirColorsOf({ up: '#e5e7eb', down: '#64748b' })).toEqual(CANDLE_SCHEMES.greenUp)
+    expect(dirColorsOf({ up: '#e5e7eb', down: '#64748b', dir: 'redUp' })).toEqual(CANDLE_SCHEMES.redUp)
+  })
+  it('guesses red-up from a reddish custom up colour', () => {
+    expect(dirSchemeOf({ up: '#ef4444', down: '#22c55e' })).toBe('redUp')
+    expect(dirSchemeOf({ up: '#22c55e', down: '#ef4444' })).toBe('greenUp')
+  })
+  it('normalize keeps a valid dir and drops junk', () => {
+    expect(normalizeCandleColors({ up: '#e5e7eb', down: '#64748b', dir: 'redUp' }).dir).toBe('redUp')
+    expect(normalizeCandleColors({ up: '#e5e7eb', down: '#64748b', dir: 'x' }).dir).toBeUndefined()
+  })
+  it('text on colour picks dark on light chips', () => {
+    expect(textOnColor('#2ee07e')).toBe('#0b0b0f')
+    expect(textOnColor('#e5e7eb')).toBe('#0b0b0f')
+    expect(textOnColor('#ff4d67')).toBe('#ffffff')
   })
 })

@@ -857,6 +857,8 @@
       "candleColors": "K 线颜色",
       "greenUp": "绿涨红跌",
       "redUp": "红涨绿跌",
+      "dirColors": "涨跌提示色",
+      "dirColorsHint": "现价标签、收线倒计时和涨跌幅用这套红绿，不跟上面自选的 K 线颜色",
       "upColor": "涨",
       "downColor": "跌",
       "custom": "自选配色"

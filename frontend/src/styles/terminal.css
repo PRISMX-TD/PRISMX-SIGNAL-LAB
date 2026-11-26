@@ -570,6 +570,22 @@
   color: var(--text-strong);
   opacity: 0.85;
 }
+/* 触屏拖动放大镜：位置由 ChartLoupe 写 transform（视口坐标），这里钉在左上角作原点。
+   Touch-drag loupe: ChartLoupe writes the position as a transform (viewport coords); top-left is the origin. */
+.chart-loupe {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1200;
+  width: 116px;
+  height: 116px;
+  border-radius: 12px;
+  overflow: hidden;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.chart-loupe canvas { display: block; width: 100%; height: 100%; }
 /* 指标图例：裸等宽字，不套模糊药丸。/ Indicator legends: plain mono, no blurred pill. */
 .term-legend {
   position: absolute;

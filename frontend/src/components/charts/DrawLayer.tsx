@@ -36,6 +36,7 @@ import DrawObjectTree from './draw/DrawObjectTree'
 import DrawFavoritesBar from './draw/DrawFavoritesBar'
 import { syncDrawingAlerts } from './alert/alertStore'
 import { drawingAlertable } from './alert/model'
+import { hideLoupe, showLoupe } from './ChartLoupe'
 
 export type { Tool, MagnetMode } from './draw/model'
 
@@ -556,6 +557,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const r = overlayRef.current!.getBoundingClientRect()
     return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
+  // 触屏拖动时把 (x, y)（层内坐标）放进放大镜：点在手指正下方，看不见 / touch drags: show (x, y) in the loupe, it sits under the finger
+  const loupeAt = (e: { pointerType: string }, x: number, y: number) => {
+    if (!isTouchLike(e.pointerType)) return
+    const r = overlayRef.current?.getBoundingClientRect()
+    if (r && Number.isFinite(x) && Number.isFinite(y)) showLoupe(chart, r.left + x, r.top + y)
+  }
   const toPoint = useCallback((x: number, y: number): Point | null => {
     const tt = xToTime(chart, x)
     const pp = series.coordinateToPrice(y) as number | null
@@ -723,6 +730,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (!e.isPrimary) {
       // 第二根手指：画到一半就作废这一笔 / a second finger voids a stroke in progress
       if (gestureRef.current?.k === 'create' || gestureRef.current?.k === 'brush') cancelCreate()
+      hideLoupe()
       return
     }
     const { x, y } = localXY(e)
@@ -794,6 +802,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       createRef.current = { d: newDrawing(type, pts), step: 1 }
       gestureRef.current = { k: 'create', pointerId: e.pointerId, startX: x, startY: y }
       showTemp()
+      loupeAt(e, s.x, s.y)
       return
     }
 
@@ -869,7 +878,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
     if (e.pointerId !== g.pointerId) return
     const prim = primRef.current
-    if (g.k === 'create') { updateCreate(x, y, e.shiftKey); return }
+    if (g.k === 'create') {
+      updateCreate(x, y, e.shiftKey)
+      const sp = snap(x, y)
+      loupeAt(e, sp.x, sp.y)
+      return
+    }
     if (g.k === 'brush') {
       const c = createRef.current
       if (!c) return
@@ -913,6 +927,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0 }
       const ids = new Set(g.ids)
       paint(list.map((d) => (ids.has(d.id) ? { ...d, pts: shiftPts(d, g.orig.get(d.id) ?? d.pts, dx, dy) } : d)))
+      loupeAt(e, x, y)
       return
     }
     // 拉手柄 / handle drag
@@ -925,6 +940,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
     const pt = toPoint(s.x, s.y)
     if (!pt) return
+    loupeAt(e, s.x, s.y)
     let pts = dragHandle(d, g.handle, pt, g.orig)
     if (d.type === 'gannSquareFixed') pts = squared(pts, g.handle === 0 ? 1 : 0)
     paint(list.map((q) => (q.id === g.id ? { ...q, pts } : q)))
@@ -934,6 +950,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const g = gestureRef.current
     if (g && e.pointerId !== g.pointerId) return
     gestureRef.current = null
+    hideLoupe()
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     setDragging(false)
     if (!g) return
@@ -1019,6 +1036,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const g = gestureRef.current
     if (g && e.pointerId !== g.pointerId) return
     gestureRef.current = null
+    hideLoupe()
     setDragging(false)
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     if (g?.k === 'create' || g?.k === 'brush') cancelCreate()
@@ -1026,6 +1044,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (prim) prim.marquee = null
     paint()
   }, [cancelCreate, paint])
+
+  // 卸载时收起放大镜 / the loupe closes on unmount
+  useEffect(() => () => hideLoupe(), [])
 
   // ──── 触屏：点一下选中 / touch: tap to select ────
   useEffect(() => {
@@ -1337,7 +1358,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       {/* 交互层 / interaction layer */}
       <div
         ref={overlayRef}
-        className="pointer-events-none absolute inset-1.5 z-10 touch-none"
+        className="pointer-events-none absolute inset-0 z-10 touch-none"
         style={{ display: visible ? '' : 'none', cursor: cursorStyle || (!isPointer(tool) ? 'crosshair' : 'default') }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}
         // 中键按下时浏览器会进「自动滚动」，挡掉 / stop the browser's middle-button autoscroll
