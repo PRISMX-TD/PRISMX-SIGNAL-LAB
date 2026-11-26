@@ -293,7 +293,7 @@ function specContractSize(spec: SymbolSpec): number | null {
 }
 
 /** 价格距离 → 每手亏损（账户货币）/ price distance → loss per lot (deposit currency) */
-function lossPerLot(priceDist: number, spec: TickSpec): number {
+export function lossPerLot(priceDist: number, spec: TickSpec): number {
   return (priceDist / spec.tickSize) * spec.tickValue
 }
 

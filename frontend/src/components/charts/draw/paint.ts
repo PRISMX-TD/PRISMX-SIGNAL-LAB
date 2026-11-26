@@ -43,22 +43,12 @@ export interface DrawEnv {
   redraw?: () => void
 }
 export interface Bar { x: number; t: number; o: number; h: number; l: number; c: number; v: number }
-// up / down = 用户的 K 线涨跌色（红涨绿跌也跟着走）/ the user's candle colours (red-up included)
-export interface DrawTheme { bg: string; text: string; up?: string; down?: string }
+export interface DrawTheme { bg: string; text: string }
 
 export const UP = '#2ee07e'
 export const DOWN = '#ff4d67'
-export const upOf = (env: DrawEnv) => env.theme.up || UP
-export const downOf = (env: DrawEnv) => env.theme.down || DOWN
 // 选中画线时轴上价格 / 时间标签的底色：品牌紫 / axis chips of a selected drawing: brand violet
 export const ACCENT = '#6e42ff'
-// 色块上的字：亮底用深字，暗底用白字 / text on a colour chip: dark on bright, white on dark
-export function textOn(hex: string): string {
-  const m = /^#([0-9a-f]{6})/i.exec(hex)
-  if (!m) return '#0b0e14'
-  const n = parseInt(m[1], 16)
-  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 125 ? '#0b0e14' : '#ffffff'
-}
 export const FONT = '11px ui-monospace, SFMono-Regular, Menlo, monospace'
 export const SANS = (px: number) => `${px}px system-ui, sans-serif`
 // 江恩扇等多线工具的配色 / colours for multi-line tools such as the Gann fan
@@ -152,6 +142,8 @@ export function labelBox(ctx: CanvasRenderingContext2D, lines: string[], cx: num
   const sc = ctx.getTransform?.()?.a || 1
   const cw = ctx.canvas?.width ? ctx.canvas.width / sc : Infinity
   if (Number.isFinite(cw) && cw > w + 4) x = Math.max(2, Math.min(x, cw - w - 2))
+  const ch = ctx.canvas?.height ? ctx.canvas.height / (ctx.getTransform?.()?.d || 1) : Infinity
+  if (Number.isFinite(ch) && ch > h + 4) y = Math.max(2, Math.min(y, ch - h - 2))
   ctx.fillStyle = bg
   ctx.beginPath()
   ctx.roundRect?.(x, y, w, h, 4) ?? ctx.rect(x, y, w, h)

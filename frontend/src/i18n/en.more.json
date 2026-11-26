@@ -1149,8 +1149,12 @@
       "cancelMsg": "Cancel {{symbol}} {{type}} {{lots}} lots @ {{price}} (#{{ticket}})",
       "ctxOrder": "{{type}} @ {{p}}",
       "plusTip": "Place an order at this price",
-      "toOrder": "Open a chart order from this long / short position",
-      "toOrderShort": "Order"
+      "toOrder": "Place an order from this position (SL / TP included)",
+      "toOrderShort": "Order",
+      "draftTitle": "Confirm order",
+      "draftMsg": "{{type}} {{symbol}} {{lots}} lots @ {{price}} · SL {{sl}} · TP {{tp}}",
+      "mktBuy": "Market buy",
+      "mktSell": "Market sell"
     },
     "ind": {
       "name": {

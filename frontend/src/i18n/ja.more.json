@@ -1149,8 +1149,12 @@
       "cancelMsg": "{{symbol}} {{type}} {{lots}} ロット @ {{price}}（#{{ticket}}）を取消",
       "ctxOrder": "{{type}} @ {{p}}",
       "plusTip": "この価格で注文",
-      "toOrder": "このロング / ショートからチャート注文を作成",
-      "toOrderShort": "注文"
+      "toOrder": "このポジションで発注（損切り・利確付き）",
+      "toOrderShort": "注文",
+      "draftTitle": "注文の確認",
+      "draftMsg": "{{type}} {{symbol}} {{lots}} ロット @ {{price}} · 損切り {{sl}} · 利確 {{tp}}",
+      "mktBuy": "成行買い",
+      "mktSell": "成行売り"
     },
     "ind": {
       "name": {

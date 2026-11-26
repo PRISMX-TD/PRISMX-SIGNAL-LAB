@@ -17,14 +17,14 @@ import { useBackToClose } from '../../utils/useBackToClose'
 import { isChartAlive } from './chartLifecycle'
 import { rawVolumeByRisk, toPips } from '../../api/utils'
 import { getTicketSizing, subscribeTicketSizing } from '../order/ticketSizing'
-import { defaultVolume } from '../order/orderMath'
+import { defaultVolume, hasTickSpec, lossPerLot, type SymbolSpec } from '../order/orderMath'
 import { useLastVolume } from '../../utils/useLastVolume'
 import { CHART_PREFS_NS } from './useChartPrefs'
 import { registerBarTimes, xToTime, timeToX } from './draw/coords'
 import {
   type Drawing, type DrawType, type Tool, type MagnetMode, type Point, type StyleProps, type DrawTemplate,
   TOOL_META, TOOL_HOTKEYS, COLORS, STYLE_KEYS, DEFAULT_EMOJI, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
-  pointsNeeded, isScreenAnchored, isPointer, BARS_PATTERN_MAX,
+  pointsNeeded, isScreenAnchored, isPointer, BARS_PATTERN_MAX, DEFAULT_ACCOUNT, DEFAULT_RISK,
 } from './draw/model'
 import { DrawingsPrimitive, type DrawScene, barsBetweenTimes, LASER_MS } from './draw/primitive'
 import { pickImageFile, compressImage } from './draw/image'
@@ -111,7 +111,9 @@ interface Props {
   onStateChange?: () => void
   // 多空仓位工具「转为订单」：按它的入场 / 止损 / 止盈开一张图上投影单（阶段 3）
   // A long/short drawing's "to order": opens a projected order from its entry / SL / TP (phase 3)
-  onToOrder?: (o: { side: 'BUY' | 'SELL'; price: number; sl: number; tp: number }) => void
+  onToOrder?: (o: { side: 'BUY' | 'SELL'; price: number; sl: number; tp: number; volume: number | null }) => void
+  // 下单账户这个品种的券商合约规格：仓位工具的金额与下单票同一口径 / broker spec, so the tool's money matches the ticket
+  spec?: SymbolSpec
   // 给选中的画线添加警报（阶段 5）/ add an alert on the selected drawing (phase 5)
   onAlert?: (d: Drawing) => void
 }
@@ -125,7 +127,7 @@ type Gesture =
 
 interface Creating { d: Drawing; step: number }
 
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder, onAlert }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder, onAlert, spec }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -226,13 +228,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const ticketSizing = useSyncExternalStore(subscribeTicketSizing, getTicketSizing)
   const { lastVolume } = useLastVolume()
   const size = useMemo(() => {
-    // 1 手在这段止损上亏多少：rawVolumeByRisk 对金额是线性的 / money lost per lot over this stop
+    // 1 手在这段止损上亏多少：有券商规格（tickSize / tickValue）就按它算，和下单票的风险预览一致；
+    // 否则按合约大小近似（rawVolumeByRisk 对金额是线性的）。
+    // Money per lot over this stop: the broker's tick spec when known (matches the ticket's risk
+    // preview), else the contract-size approximation (rawVolumeByRisk is linear in money).
     const perLot = (dist: number, ref: number) => {
-      const v = rawVolumeByRisk(symbol, 100, 100, dist, ref)
+      if (!(dist > 0)) return null
+      if (hasTickSpec(spec)) return lossPerLot(dist, spec)
+      const v = rawVolumeByRisk(symbol, 100, 100, dist, ref, spec?.contractSize ?? null)
       return v != null && v > 0 ? 100 / v : null
     }
     const sz = ticketSizing ?? { mode: 'lots' as const, lots: parseFloat(defaultVolume(lastVolume, symbol)) }
-    return (dist: number, ref: number): { q: number | null; risk: number | null } => {
+    const fn = (dist: number, ref: number): { q: number | null; risk: number | null } => {
       const pl = perLot(dist, ref)
       if (sz.mode === 'risk' && sz.equity != null && sz.equity > 0) {
         const risk = sz.equity * sz.pct / 100
@@ -241,14 +248,15 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const q = sz.lots != null && sz.lots > 0 ? sz.lots : null
       return { q, risk: q != null && pl != null ? q * pl : null }
     }
-  }, [ticketSizing, lastVolume, symbol])
+    return { size: fn, qty: (riskAmt: number, dist: number, ref: number) => { const pl = perLot(dist, ref); return pl ? riskAmt / pl : null } }
+  }, [ticketSizing, lastVolume, symbol, spec])
   const scene = useMemo<DrawScene>(() => ({
     fmtPrice,
     fmtTime: fmtTime ?? ((x: number) => new Date(x * 1000).toISOString().slice(0, 16).replace('T', ' ')),
     L: labels,
     theme: theme ?? { bg: '#09090b', text: '#94a3b8' },
-    qty: (riskAmt, sl, refP) => rawVolumeByRisk(symbol, riskAmt, 100, sl, refP),
-    size,
+    qty: size.qty,
+    size: size.size,
     pips: (dp) => toPips(symbol, dp),
     interval,
     symbol,
@@ -1357,7 +1365,13 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           onToOrder={onToOrder && selDrawings.length === 1 && (selDrawings[0].type === 'long' || selDrawings[0].type === 'short') ? () => {
             // 仓位工具的三个点：入场、目标（止盈）、止损 / the position tool's points: entry, target (TP), stop (SL)
             const d = selDrawings[0]
-            onToOrder({ side: d.type === 'long' ? 'BUY' : 'SELL', price: d.pts[0].p, tp: d.pts[1].p, sl: d.pts[2].p })
+            // 手数与图上显示的一致：画线自己填了账户规模 / 风险 % 就按它，否则跟下单票
+            // Lots as shown on the chart: the drawing's own account size / risk %, else the ticket's
+            const dist = Math.abs(d.pts[0].p - d.pts[2].p)
+            const volume = d.account != null || d.risk != null
+              ? size.qty((d.account ?? DEFAULT_ACCOUNT) * (d.risk ?? DEFAULT_RISK) / 100, dist, d.pts[0].p)
+              : size.size(dist, d.pts[0].p).q
+            onToOrder({ side: d.type === 'long' ? 'BUY' : 'SELL', price: d.pts[0].p, tp: d.pts[1].p, sl: d.pts[2].p, volume })
           } : undefined}
           onAlert={onAlert && selDrawings.length === 1 && drawingAlertable(selDrawings[0]) ? () => onAlert(selDrawings[0]) : undefined}
           t={t}

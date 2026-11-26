@@ -1149,8 +1149,12 @@
       "cancelMsg": "Hủy {{symbol}} {{type}} {{lots}} lot @ {{price}} (#{{ticket}})",
       "ctxOrder": "{{type}} @ {{p}}",
       "plusTip": "Đặt lệnh tại giá này",
-      "toOrder": "Tạo lệnh trên biểu đồ từ vị thế Long / Short này",
-      "toOrderShort": "Lệnh"
+      "toOrder": "Đặt lệnh theo vị thế này (kèm SL / TP)",
+      "toOrderShort": "Lệnh",
+      "draftTitle": "Xác nhận đặt lệnh",
+      "draftMsg": "{{type}} {{symbol}} {{lots}} lot @ {{price}} · SL {{sl}} · TP {{tp}}",
+      "mktBuy": "Mua thị trường",
+      "mktSell": "Bán thị trường"
     },
     "ind": {
       "name": {

@@ -1149,8 +1149,12 @@
       "cancelMsg": "ยกเลิก {{symbol}} {{type}} {{lots}} ล็อต @ {{price}} (#{{ticket}})",
       "ctxOrder": "{{type}} @ {{p}}",
       "plusTip": "ส่งคำสั่งที่ราคานี้",
-      "toOrder": "สร้างคำสั่งบนกราฟจากสถานะ Long / Short นี้",
-      "toOrderShort": "คำสั่ง"
+      "toOrder": "ส่งคำสั่งตามตำแหน่งนี้ (รวม SL / TP)",
+      "toOrderShort": "คำสั่ง",
+      "draftTitle": "ยืนยันคำสั่งซื้อขาย",
+      "draftMsg": "{{type}} {{symbol}} {{lots}} ล็อต @ {{price}} · SL {{sl}} · TP {{tp}}",
+      "mktBuy": "ซื้อที่ราคาตลาด",
+      "mktSell": "ขายที่ราคาตลาด"
     },
     "ind": {
       "name": {

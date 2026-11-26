@@ -13,7 +13,7 @@ import type {
 import type { MainSeriesApi } from '../useChartEngine'
 import { type Drawing, visibleOn, isScreenAnchored } from './model'
 import { timeToX, barsBetween } from './coords'
-import { type Bar, type DrawTheme, ACCENT } from './paint'
+import { type Bar, type DrawTheme, ACCENT, UP, DOWN } from './paint'
 import { intrabarBars, subscribeIntrabar } from './intrabar'
 import { barSpacingSeconds } from '../chartConfig'
 import {
@@ -112,6 +112,11 @@ export class DrawingsPrimitive {
         if (d.type === 'hline' || d.type === 'hray') addP(d.pts[0].p, d.color)
         else if (d.type === 'vline') addT(d.pts[0].t, d.color)
         else if (d.type === 'crossline') { addP(d.pts[0].p, d.color); addT(d.pts[0].t, d.color) }
+        else if (sel(d) && (d.type === 'long' || d.type === 'short')) {
+          // 仓位工具：入场品牌紫、止盈绿、止损红 / position tool: entry violet, target green, stop red
+          addP(d.pts[0].p, ACCENT); addP(d.pts[1].p, UP); addP(d.pts[2].p, DOWN)
+          addT(d.pts[0].t, ACCENT); if (d.pts[1].t !== d.pts[0].t) addT(d.pts[1].t, ACCENT)
+        }
         else if (sel(d) && d.type !== 'brush' && d.type !== 'highlighter' && !isScreenAnchored(d.type)) {
           const seenT = new Set<number>(), seenP = new Set<number>()
           for (const pt of d.pts) {

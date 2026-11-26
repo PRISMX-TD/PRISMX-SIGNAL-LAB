@@ -58,9 +58,11 @@ import PlusOrderButton from '../components/charts/trade/PlusOrderButton'
 import ExecutionMarkers from '../components/charts/trade/ExecutionMarkers'
 import { useFillSound } from '../components/charts/trade/useFillSound'
 import { autoEntryType } from '../components/charts/trade/tradeMath'
-import type { ChartPlace } from '../components/charts/trade/useTradeActions'
-import type { SymbolSpec } from '../components/order/orderMath'
-import { brokerSymbol, clientOrderId, localizeApiError } from '../api/utils'
+import type { ChartPlace, ChartPlaceReq } from '../components/charts/trade/useTradeActions'
+import { clampLots, defaultVolume, type SymbolSpec } from '../components/order/orderMath'
+import ConfirmModal from '../components/ConfirmModal'
+import { useLastVolume } from '../utils/useLastVolume'
+import { brokerSymbol, clientOrderId, localizeApiError, lotDecimals } from '../api/utils'
 import DrawToolsRow from '../components/charts/DrawToolsRow'
 import PositionMarkerToggle from '../components/charts/PositionMarkerToggle'
 import IntervalSeg from '../components/charts/IntervalSeg'
@@ -96,7 +98,7 @@ import { useChartEngine, type ChartView, type IndView } from '../components/char
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
 import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
 import type { Order, Quote } from '../api/types'
-import type { Side, DraftFill } from '../components/order/useOrderForm'
+import { draftEntryType, type Side, type DraftFill } from '../components/order/useOrderForm'
 import {
   FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
   priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, INTERVALS,
@@ -794,11 +796,7 @@ export default function ChartsPage() {
   const timeFmt = useMemo(() => makeTimeFormatters(cprefs.timezone, ivKind, lang), [cprefs.timezone, ivKind, lang])
   // 画线层：轴标签 / 坐标页签的时间格式与画布底色 / drawing layer: time labels and canvas colours
   const drawFmtTime = useCallback((x: number) => timeFmt.crosshair(x as Time), [timeFmt])
-  // 多空仓位 / 价格区间等画线的涨跌色跟用户的 K 线配色走 / drawings' up / down follow the user's candle colours
-  const drawTheme = useMemo(
-    () => ({ bg: palette.bg, text: palette.text, up: candleColors.up, down: candleColors.down }),
-    [palette.bg, palette.text, candleColors.up, candleColors.down],
-  )
+  const drawTheme = useMemo(() => ({ bg: palette.bg, text: palette.text }), [palette.bg, palette.text])
   const watermark = cprefs.canvas.watermark && symbol ? `${symbol} · ${intervalLabel(interval)}` : null
   const view = useMemo<ChartView>(() => ({
     chartType: cprefs.chartType,
@@ -1164,25 +1162,61 @@ export default function ChartsPage() {
   }, [exactDigits])
   useFillSound(accountOrders, symbol, cprefs.trading.sound)
 
-  // 多空仓位工具的「下单」：把方向、入场、止损、止盈填进下单票并把票亮出来（桌面经典版右栏常驻；
-  // 专业版切到交易面板；手机打开下单抽屉）。全屏时票不可见，退回图上投影单。
-  // The long/short tool's order button: fill side / entry / SL / TP into the order ticket and bring it
-  // up (classic desktop: always-on right column; pro: switch to the trade panel; phone: open the trade
-  // sheet). In fullscreen the ticket is hidden, so fall back to the projected order on the chart.
+  // 多空仓位工具的「下单」：按画线的方向、入场、止损、止盈和图上显示的手数直接下单（先弹确认；开了
+  // 一键下单就不确认）。入场价离现价近按市价，否则自动选限价 / 止损挂单。没有在线账户时退回填下单票
+  // （票上会说明为什么下不了）；全屏时退回图上投影单。
+  // The long/short tool's order button places the order straight away from the drawing's side, entry,
+  // SL, TP and the lots shown on the chart (after a confirm, skipped with one-click on). Near the market
+  // it's a market order, otherwise a limit / stop. With no online account it fills the ticket instead
+  // (which explains why); in fullscreen it falls back to the projected order on the chart.
   const [ticketPrefill, setTicketPrefill] = useState<(DraftFill & { nonce: number }) | null>(null)
   const clearTicketPrefill = useCallback(() => setTicketPrefill(null), [])
-  const drawToOrder = useCallback((o: { side: Side; price: number; sl: number; tp: number }) => {
+  const drawSpec = useSymbolSpec(tradeLogin, symbol)
+  const { lastVolume } = useLastVolume()
+  const [drawOrder, setDrawOrder] = useState<ChartPlaceReq | null>(null)
+  const [drawOrderBusy, setDrawOrderBusy] = useState(false)
+  const placeDrawOrder = useCallback(async (req: ChartPlaceReq) => {
+    setDrawOrderBusy(true)
+    const placed = await chartPlace(req)
+    setDrawOrderBusy(false)
+    setDrawOrder(null)
+    if (!placed) return
+    if (placed.status === 'PLACED') showToast(String(t('charts.ticket.pendingPlaced', { price: placed.price != null ? placed.price.toFixed(decimals) : EMPTY })), 'success')
+    else if (placed.status === 'FILLED') showToast(String(t('charts.ticket.filledAt', { price: placed.filledPrice != null ? placed.filledPrice.toFixed(decimals) : EMPTY })), 'success')
+    else if (placed.status === 'REJECTED' || placed.status === 'FAILED') showToast(placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')), 'error')
+    else showToast(String(t(activeAccount?.source === 'gateway' ? 'charts.ticket.acceptedGateway' : 'charts.ticket.accepted')), 'info')
+  }, [chartPlace, showToast, t, decimals, activeAccount?.source])
+  const drawToOrder = useCallback((o: { side: Side; price: number; sl: number; tp: number; volume: number | null }) => {
     if (isFullscreen) { openDraft(o.side, o.price, o.sl, o.tp); return }
     const f = exactDigits != null ? Math.pow(10, exactDigits) : null
     const r = (v: number) => (f != null ? Math.round(v * f) / f : v)
-    setTicketPrefill({ nonce: Date.now(), side: o.side, price: r(o.price), sl: r(o.sl), tp: r(o.tp) })
-    if (isDesktop) {
-      if (pro) updatePro({ widget: 'trade', focus: false })
-    } else {
-      setTradeSide(o.side)
-      setSheet('trade')
+    if (!tradeLogin) {
+      setTicketPrefill({ nonce: Date.now(), side: o.side, price: r(o.price), sl: r(o.sl), tp: r(o.tp) })
+      if (isDesktop) { if (pro) updatePro({ widget: 'trade', focus: false }) } else { setTradeSide(o.side); setSheet('trade') }
+      return
     }
-  }, [isFullscreen, openDraft, exactDigits, isDesktop, pro, updatePro])
+    const q = quoteNow()
+    const type = draftEntryType(o.side === 'BUY', o.price, q.bid, q.ask)
+    const raw = o.volume != null && o.volume > 0 ? o.volume : parseFloat(defaultVolume(lastVolume, symbol))
+    const req: ChartPlaceReq = {
+      side: o.side, volume: clampLots(raw, symbol), login: tradeLogin,
+      sl: r(o.sl), tp: r(o.tp), type, price: type === 'MARKET' ? null : r(o.price),
+    }
+    if (cprefs.trading.oneClick) void placeDrawOrder(req)
+    else setDrawOrder(req)
+  }, [isFullscreen, openDraft, exactDigits, tradeLogin, isDesktop, pro, updatePro, quoteNow, lastVolume, symbol, cprefs.trading.oneClick, placeDrawOrder])
+  useBackToClose(drawOrder != null && !drawOrderBusy, () => setDrawOrder(null))
+  const drawOrderMsg = (() => {
+    if (!drawOrder) return ''
+    const q = quoteNow()
+    const buy = drawOrder.side === 'BUY'
+    const typeText = drawOrder.type === 'MARKET'
+      ? String(t(buy ? 'charts.trade.mktBuy' : 'charts.trade.mktSell'))
+      : String(t(`order.pending.type.${drawOrder.side}_${drawOrder.type}`))
+    const px = drawOrder.price ?? (buy ? q.ask : q.bid)
+    const fx = (v: number | null) => (v != null ? v.toFixed(decimals) : EMPTY)
+    return String(t('charts.trade.draftMsg', { type: typeText, symbol, lots: drawOrder.volume.toFixed(lotDecimals(symbol)), price: fx(px), sl: fx(drawOrder.sl), tp: fx(drawOrder.tp) }))
+  })()
 
   // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
   // The ticket subscribes to its own quotes (per account + the symbol's site-wide one).
@@ -1457,6 +1491,7 @@ export default function ChartsPage() {
                 theme={drawTheme}
                 onStateChange={bumpDraw}
                 onToOrder={drawToOrder}
+                spec={drawSpec}
                 onAlert={(d) => openAlert({ drawing: d })}
               />
             )}
@@ -1580,6 +1615,17 @@ export default function ChartsPage() {
         )}
         {gotoOpen && <GoToDateDialog timezone={cprefs.timezone} onGo={(ts) => { void goToTime(ts) }} onClose={() => { setGotoOpen(false); focusChart() }} />}
         {keysOpen && <ShortcutsDialog onClose={() => { setKeysOpen(false); focusChart() }} />}
+        {drawOrder && (
+          <ConfirmModal
+            title={String(t('charts.trade.draftTitle'))}
+            message={drawOrderMsg}
+            confirmLabel={String(t('charts.trade.toOrderShort'))}
+            busy={drawOrderBusy}
+            center
+            onConfirm={() => { void placeDrawOrder(drawOrder) }}
+            onCancel={() => setDrawOrder(null)}
+          />
+        )}
         {alertMgrOpen && (
           <AlertManager
             symbol={symbol}

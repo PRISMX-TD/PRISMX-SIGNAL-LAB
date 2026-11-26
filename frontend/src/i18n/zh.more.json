@@ -1149,8 +1149,12 @@
       "cancelMsg": "撤销 {{symbol}} {{type}} {{lots}} 手 @ {{price}}（#{{ticket}}）",
       "ctxOrder": "{{type}} @ {{p}}",
       "plusTip": "在这个价位下单",
-      "toOrder": "按这个多空仓位在图上开一张单",
-      "toOrderShort": "下单"
+      "toOrder": "按这个多空仓位下单（带上止损止盈）",
+      "toOrderShort": "下单",
+      "draftTitle": "确认下单",
+      "draftMsg": "{{type}} {{symbol}} {{lots}} 手 @ {{price}} · 止损 {{sl}} · 止盈 {{tp}}",
+      "mktBuy": "市价买入",
+      "mktSell": "市价卖出"
     },
     "ind": {
       "name": {
