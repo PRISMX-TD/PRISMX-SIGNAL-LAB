@@ -26,6 +26,7 @@ import { createWatchTicks, type WatchTicks } from '../watchTicks'
 import ChartPopover from '../ChartPopover'
 import { IcCheck, IcChevron, IcClose, IcGear, IcSearch, IcWifiOff } from './icons'
 import { useProPrefs } from './proPrefs'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 interface Props {
   symbols: string[]
@@ -62,6 +63,7 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   const { tabs, tab, setTab, visible, favEnabled, favSet, toggleFavorite } = useSymbolTabs(symbols, 'proWatchTab')
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
+  useBackToClose(searching, () => { setSearching(false); setQuery('') })
   const [shut, setShut] = useState<ReadonlySet<SymbolCategory>>(() => new Set())
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)

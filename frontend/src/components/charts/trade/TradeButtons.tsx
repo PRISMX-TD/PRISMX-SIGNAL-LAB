@@ -13,6 +13,7 @@ import { useMarketClosedText, useMarketStatus } from '../../order/useMarketStatu
 import { useLastVolume } from '../../../utils/useLastVolume'
 import { pointSize, type Side } from './tradeMath'
 import type { ChartPlace } from './useTradeActions'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 interface Props {
   symbol: string
@@ -42,6 +43,7 @@ function TradeButtons({ symbol, digits, login, oneClick, touch, onPlace, quotesD
   const [vol, setVol] = useState(() => defaultVolume(lastVolume, symbol))
   const [ask_, setAsk] = useState<Side | null>(null)
   const [busy, setBusy] = useState<Side | null>(null)
+  useBackToClose(ask_ != null && busy == null, () => setAsk(null))
   const market = useMarketStatus(symbol)
   const closedText = useMarketClosedText(market)
   const touched = useRef(false)

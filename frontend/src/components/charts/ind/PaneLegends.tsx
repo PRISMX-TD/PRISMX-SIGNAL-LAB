@@ -17,6 +17,7 @@ import { EMPTY } from '../../../utils/format'
 import { defOf } from './registry'
 import { instArgs, plotStyle, resolveColor } from './style'
 import type { IndDef, IndInstance, IndLayout, ScalePin } from './types'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 export interface LegendActions {
   toggleHidden: (uid: string) => void
@@ -87,6 +88,7 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
   const legend = useLegend(legendStore)
   const [active, setActive] = useState<string | null>(null)
   const [menu, setMenu] = useState<string | null>(null)
+  useBackToClose(menu != null, () => setMenu(null))
   const [drag, setDrag] = useState<{ uid: string; y: number; target: string | null } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const [fold, setFoldState] = useState(readFold)

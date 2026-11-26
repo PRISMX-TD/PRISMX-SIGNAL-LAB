@@ -9,6 +9,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 function hsl(h: number, s: number, l: number): string {
   const a = (s / 100) * Math.min(l / 100, 1 - l / 100)
@@ -177,6 +178,7 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved,
   presets?: readonly string[]
 }) {
   const [open, setOpen] = useState(false)
+  useBackToClose(open, () => setOpen(false))
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)

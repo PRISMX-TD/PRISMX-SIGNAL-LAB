@@ -22,6 +22,11 @@ export default function PwaBackGuard({ children }: { children: ReactNode }) {
     // Inject a guard history entry so back never exits the PWA entirely
     if (!guardRef.current) {
       guardRef.current = true
+      // 守卫下面那条（打开 App 时的第一条）也做个记号：直接从图表页等非首页打开时，退过守卫会落到它上面，
+      // 以前这一步什么都不发生（空转），再按一次就直接退出了 App。
+      // Mark the entry under the guard (the first one) too: opened straight on a non-home page such as the
+      // chart, backing past the guard lands there; that step used to do nothing and the next back quit.
+      window.history.replaceState({ ...(window.history.state ?? {}), __pwaRoot: true }, '', window.location.href)
       window.history.pushState({ __pwaGuard: true }, '', window.location.href)
     }
 
@@ -60,6 +65,14 @@ export default function PwaBackGuard({ children }: { children: ReactNode }) {
         // worst experience on a promo landing. The Capacitor shell keeps the guard.
         if (!authedRef.current && !isNativeApp()) return
         window.history.pushState({ __pwaGuard: true }, '', window.location.href)
+        navigate('/app', { replace: true })
+        return
+      }
+      // 落到了最底下那条，而且不在首页：就地换成首页（不再压守卫），再按返回才是真的退出——
+      // 不会出现「永远退不出去」。/ Landed on the very first entry away from home: turn it into home in
+      // place (no new guard), so the next back really exits and the user is never trapped.
+      if (window.history.state?.__pwaRoot && window.location.pathname !== '/app') {
+        if (!authedRef.current && !isNativeApp()) return
         navigate('/app', { replace: true })
       }
     }

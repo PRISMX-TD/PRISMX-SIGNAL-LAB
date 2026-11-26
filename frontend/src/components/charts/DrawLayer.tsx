@@ -480,6 +480,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (isDrawType(tl)) { const c = defaultsRef.current[tl]?.color; if (c) setColor(c) }
   }, [select])
 
+  // 返回手势：先取消正在画的工具（回到光标），再取消选中，对象树单独一层
+  // Back gesture: put down the armed draw tool first, then clear the selection; the object tree is its own layer
+  useBackToClose(!isPointer(tool), () => setTool('cursor'))
+  useBackToClose(sel.length > 0, () => select([]))
+  useBackToClose(treeOpen, () => setTreeOpen(false))
+
   // ──── 句柄 / handle ────
   const lockedCount = drawings.filter((d) => d.locked).length
   const toggleTree = useCallback(() => setTreeOpen((v) => !v), [])

@@ -11,6 +11,7 @@ import type { IChartApi, MouseEventParams } from 'lightweight-charts'
 import type { MainSeriesApi } from '../useChartEngine'
 import { isChartAlive } from '../chartLifecycle'
 import { autoEntryType, type Side } from './tradeMath'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 interface Props {
   chart: IChartApi
@@ -27,6 +28,7 @@ export default function PlusOrderButton({ chart, series, digits, quote, onPick, 
   const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
   const [at, setAt] = useState<{ y: number; x: number; price: number } | null>(null)
   const [menu, setMenu] = useState<{ y: number; x: number; price: number } | null>(null)
+  useBackToClose(menu != null, () => setMenu(null))
   const menuRef = useRef<HTMLDivElement>(null)
   // 鼠标移到「+」上就离开了图表画布，图表会报「十字线没了」；这时要是把「+」藏掉，鼠标又落回
   // 画布、「+」又出现……来回闪。所以指在「+」上时不理会这类事件，移出「+」再交还给十字线。

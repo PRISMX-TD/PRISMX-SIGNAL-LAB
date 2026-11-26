@@ -52,6 +52,7 @@ import { autoEntryType, canBreakeven, fmtSigned, moveReadout, pointSize, stagedL
 import { useTradeActions, type ChartPlace } from './trade/useTradeActions'
 import DraftTicket, { type Draft } from './trade/DraftTicket'
 import ClosePopover from './trade/ClosePopover'
+import { useBackToClose } from '../../utils/useBackToClose'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
 const isTouchDevice = typeof window !== 'undefined'
@@ -460,6 +461,10 @@ export default function PositionOverlay({
   const [closePop, setClosePop] = useState<{ ticket: number; x: number; y: number } | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [draftBusy, setDraftBusy] = useState(false)
+  // 返回手势收掉确认框 / 平仓比例弹层 / 投影单 / back closes the confirm, the close-ratio popover and the draft
+  useBackToClose(confirmState != null && !confirmBusy, () => setConfirmState(null))
+  useBackToClose(closePop != null, () => setClosePop(null))
+  useBackToClose(draft != null && !draftBusy, () => setDraft(null))
 
   // 投影单请求：nonce 变了就按它开一张新的（手数取上次用过的）。
   // A projected-order request: a new nonce opens a new draft (volume = the last one used).

@@ -1071,6 +1071,20 @@ export default function ChartsPage() {
     addIndicator(id)
   }, [addIndicator, isPro])
   const closeCmd = useCallback(() => { setCmd(null); focusChart() }, [focusChart])
+
+  // 返回手势 / 返回键（PWA 与 App）：先收掉最上面那层，再退出专业版，最后才离开图表页。
+  // 弹窗类（ChartDialog / ChartPopover / ConfirmModal / 抽屉 / 全屏）各自已接管；这里补上图表页自己的
+  // 模式与浮层。Back gesture / key (PWA and App): peel off the top layer first, then leave the pro
+  // layout, and only then leave the charts page. Dialogs, popovers, sheets and fullscreen already claim
+  // it themselves; these are the page's own modes and floating layers.
+  useBackToClose(cmd != null, closeCmd)
+  useBackToClose(proDraw, () => setProDraw(false))
+  useBackToClose(quick != null, () => setQuick(null))
+  useBackToClose(measureOn, () => setMeasureOn(false))
+  useBackToClose(zoomOn, () => setZoomOn(false))
+  useBackToClose(ctx != null, () => setCtx(null))
+  useBackToClose(maxPane != null, () => setMaxPane(null))
+  useBackToClose(pro, () => setLayout('classic'))
   const toggleFocus = useCallback(() => updatePro((p) => ({ ...p, focus: !p.focus })), [updatePro])
   const proActions = useMemo<ProAction[]>(() => {
     const L = (k: string) => String(t(k))
@@ -1205,7 +1219,6 @@ export default function ChartsPage() {
     if (cprefs.trading.oneClick) void placeDrawOrder(req)
     else setDrawOrder(req)
   }, [isFullscreen, openDraft, exactDigits, tradeLogin, isDesktop, pro, updatePro, quoteNow, lastVolume, symbol, cprefs.trading.oneClick, placeDrawOrder])
-  useBackToClose(drawOrder != null && !drawOrderBusy, () => setDrawOrder(null))
   const drawOrderMsg = (() => {
     if (!drawOrder) return ''
     const q = quoteNow()

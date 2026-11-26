@@ -27,6 +27,7 @@ import { IcRuler as Ruler, IcZoom as Zoom, IcMagnet as Magnet, IcStay as Stay, I
 import { usePrefs } from '../../../store/prefs'
 import { CHART_PREFS_NS } from '../useChartPrefs'
 import ConfirmModal from '../../ConfirmModal'
+import { useBackToClose } from '../../../utils/useBackToClose'
 
 type HideMode = 'drawings' | 'indicators' | 'positions' | 'all'
 type RemoveMode = 'drawings' | 'indicators' | 'all'
@@ -74,6 +75,7 @@ export default function ProDrawRail(p: Props) {
   const last = getPref<Record<string, string>>(CHART_PREFS_NS, 'drawGroupLast', {}) || {}
   const [open, setOpen] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<RemoveMode | null>(null)
+  useBackToClose(open != null, () => setOpen(null))
   const refs = useRef<Record<string, HTMLElement | null>>({})
   const dl = drawLayerRef.current
   const cur = dl?.tool ?? 'cursor'
