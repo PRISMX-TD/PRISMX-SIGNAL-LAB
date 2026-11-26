@@ -69,6 +69,35 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   const showPrice = prefs.wlPrice
   const gearRef = useRef<HTMLButtonElement>(null)
   const [menu, setMenu] = useState(false)
+  // 分类标签一行放不下时横向滚：滚动条是藏起来的，鼠标滚轮默认只上下滚，这里把滚轮
+  // 换成左右滚（触控板横扫本来就行）；切换分类时把选中的标签滚进视野。
+  // The category chips scroll sideways when they don't fit. The scrollbar is hidden and a
+  // mouse wheel only scrolls vertically, so the wheel is turned into horizontal scrolling
+  // here (trackpad swipes already work); switching tabs brings the active chip into view.
+  const chipsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = chipsRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    // 滚到头就去掉右边的渐隐，最后一个标签不再半透明 / drop the right fade once scrolled to the end
+    const onScroll = () => el.classList.toggle('at-end', el.scrollLeft + el.clientWidth >= el.scrollWidth - 2)
+    onScroll()
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('scroll', onScroll) }
+  }, [searching])
+  useEffect(() => {
+    const el = chipsRef.current
+    const on = el?.querySelector<HTMLElement>('button.on')
+    if (!el || !on) return
+    const l = on.offsetLeft - el.offsetLeft
+    if (l < el.scrollLeft) el.scrollLeft = l - 8
+    else if (l + on.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = l + on.offsetWidth - el.clientWidth + 18
+  }, [tab, searching])
 
   const q = query.trim().toUpperCase()
   const rows = q ? symbols.filter((s) => s.toUpperCase().includes(q) || displaySymbol(s).toUpperCase().includes(q)) : visible
@@ -159,7 +188,7 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
           </label>
         ) : (
           <>
-            <div className="pt-chips no-sb" role="tablist">
+            <div ref={chipsRef} className="pt-chips no-sb" role="tablist">
               {tabs.map((k) => (
                 <button key={k} type="button" role="tab" aria-selected={k === tab} className={k === tab ? 'on' : undefined} onClick={() => setTab(k)}>
                   {tt(`signals.symbolTabs.${k}`)}
