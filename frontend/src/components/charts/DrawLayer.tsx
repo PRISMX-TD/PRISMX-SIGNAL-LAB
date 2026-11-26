@@ -561,7 +561,15 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const loupeAt = (e: { pointerType: string }, x: number, y: number) => {
     if (!isTouchLike(e.pointerType)) return
     const r = overlayRef.current?.getBoundingClientRect()
-    if (r && Number.isFinite(x) && Number.isFinite(y)) showLoupe(chart, r.left + x, r.top + y)
+    if (!r || !Number.isFinite(x) || !Number.isFinite(y)) return
+    const p = primRef.current
+    if (p && !p.noHandles) { p.noHandles = true; p.requestUpdate() }
+    showLoupe(chart, r.left + x, r.top + y)
+  }
+  const endLoupe = () => {
+    hideLoupe()
+    const p = primRef.current
+    if (p?.noHandles) { p.noHandles = false; p.requestUpdate() }
   }
   const toPoint = useCallback((x: number, y: number): Point | null => {
     const tt = xToTime(chart, x)
@@ -730,7 +738,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (!e.isPrimary) {
       // 第二根手指：画到一半就作废这一笔 / a second finger voids a stroke in progress
       if (gestureRef.current?.k === 'create' || gestureRef.current?.k === 'brush') cancelCreate()
-      hideLoupe()
+      endLoupe()
       return
     }
     const { x, y } = localXY(e)
@@ -950,7 +958,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const g = gestureRef.current
     if (g && e.pointerId !== g.pointerId) return
     gestureRef.current = null
-    hideLoupe()
+    endLoupe()
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     setDragging(false)
     if (!g) return
@@ -1036,7 +1044,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const g = gestureRef.current
     if (g && e.pointerId !== g.pointerId) return
     gestureRef.current = null
-    hideLoupe()
+    endLoupe()
     setDragging(false)
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     if (g?.k === 'create' || g?.k === 'brush') cancelCreate()

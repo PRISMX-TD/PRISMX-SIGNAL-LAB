@@ -60,6 +60,8 @@ export class DrawingsPrimitive {
   hover: string | null = null
   // 鼠标正压在悬停画线的第几个手柄上（-1 = 没有），那个手柄画实心 / handle under the mouse, painted solid
   hoverHandle = -1
+  // 触屏拖动（放大镜开着）时不画手柄：手柄的实心圆点放大后正好盖住落点 / no handles during a touch drag: the dot would hide the point in the loupe
+  noHandles = false
   marquee: { x1: number; y1: number; x2: number; y2: number } | null = null
   scene: DrawScene
 
@@ -250,7 +252,7 @@ export class DrawingsPrimitive {
       ctx.save()
       renderDrawing(ctx, d, px, env, d === this.temp || this.selected.has(d.id) || this.hover === d.id)
       ctx.restore()
-      if (showHandles) paintHandles(ctx, handlesOf(d, px, env), d, r, env.theme.bg, d.id === this.hover ? this.hoverHandle : -1)
+      if (showHandles && !this.noHandles) paintHandles(ctx, handlesOf(d, px, env), d, r, env.theme.bg, d.id === this.hover ? this.hoverHandle : -1)
     }
     for (const d of this.list) {
       if (!visibleOn(d, this.scene.interval)) continue
