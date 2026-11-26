@@ -123,6 +123,8 @@ import ProTopBar from '../components/charts/pro/ProTopBar'
 import ProWidgets, { ProAlerts, ProDetails } from '../components/charts/pro/ProWidgets'
 import ProWatchlist from '../components/charts/pro/ProWatchlist'
 import ProDrawRail from '../components/charts/pro/ProDrawRail'
+import ChartPopover from '../components/charts/ChartPopover'
+import { IcEye } from '../components/charts/draw/railIcons'
 import { ProZoomBox } from '../components/charts/pro/ProZoom'
 import ProCommand, { type ProAction, type ProCommandMode } from '../components/charts/pro/ProCommand'
 import { ProDock, ProIsland, ProTabBar, type IslandEvent, type ProTab } from '../components/charts/pro/ProChrome'
@@ -1019,6 +1021,11 @@ export default function ChartsPage() {
   // hide / remove all indicators at once
   const [zoomOn, setZoomOn] = useState(false)
   const [zoomStack, setZoomStack] = useState<LogicalRange[]>([])
+  // 手机底栏（照 TradingView 手机版）：画笔开合左侧悬浮画线栏、「更多」菜单
+  // Phone bottom bar (like TradingView's phone app): the pen toggles the floating draw bar; the More menu
+  const [mDraw, setMDraw] = useState(false)
+  const [mMore, setMMore] = useState(false)
+  const mMoreRef = useRef<HTMLButtonElement>(null)
   useEffect(() => { setZoomStack([]); setZoomOn(false) }, [symbol, interval])
   const zoomOut = () => {
     const prev = zoomStack[zoomStack.length - 1]
@@ -1039,11 +1046,11 @@ export default function ChartsPage() {
   // The mobile quote strip's second row: the left ~2/3 is the always-on draw-tools bar
   // (swipe sideways for every tool); the right holds Indicators and the settings gear (which
   // has the show-positions switch). The bottom toolbar keeps only intervals + positions.
+  // 2026-11-26 起画线工具改由底栏的画笔打开左侧悬浮栏（TradingView 手机版的做法），这一行只剩操作按钮。
+  // Since 2026-11-26 the draw tools open from the bottom bar's pen as a floating left bar (as in
+  // TradingView's phone app); this row keeps only the action buttons.
   const mobileTools = (
     <>
-      <div className="term-qs-draw">
-        {drawReady && <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
-      </div>
       <div className="term-qs-acts">
         <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn" aria-label={String(t('charts.indicators.button'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
@@ -1279,11 +1286,59 @@ export default function ChartsPage() {
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
               Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
           {!isFullscreen && !pro && (
-            <div className="term-tb" ref={tbRef}>
-              <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
-              <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
-              <span className="term-toolbar-divider" aria-hidden />
-              <ChartTypeMenu value={cprefs.chartType} onChange={(v) => updatePrefs({ chartType: v })} />
+            <div className={`term-tb ${isDesktop ? '' : 'term-tb--m'}`} ref={tbRef}>
+              {isDesktop ? (
+                <>
+                  <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
+                  <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
+                  <span className="term-toolbar-divider" aria-hidden />
+                  <ChartTypeMenu value={cprefs.chartType} onChange={(v) => updatePrefs({ chartType: v })} />
+                </>
+              ) : (
+                // 手机底栏：品种 · 周期 ┊ 画笔 · 图表类型 · 更多 ┊ 撤销 · 重做（右边仍是持仓）
+                // Phone bottom bar: symbol · interval ┊ pen · chart type · more ┊ undo · redo (positions stay on the right)
+                <>
+                  <button type="button" className="term-mbar-btn term-mbar-txt term-mbar-sym" onClick={openWatchlistSheet} aria-label={String(t('charts.mbar.symbol'))}>
+                    <span>{symbol}</span>
+                  </button>
+                  <IntervalMenu asLabel value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
+                  <span className="term-toolbar-divider" aria-hidden />
+                  <button type="button" className={`term-mbar-btn ${mDraw ? 'on' : ''}`} aria-pressed={mDraw} onClick={() => setMDraw((v) => !v)}
+                    aria-label={String(t('charts.mbar.draw'))} title={String(t('charts.mbar.draw'))}>
+                    <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 22.5l1.2-4.7L18.5 6.5l3.5 3.5L10.7 21.3z" /><path d="M16.5 8.5L20 12" /><path d="M15 23h8" /></svg>
+                  </button>
+                  <ChartTypeMenu value={cprefs.chartType} onChange={(v) => updatePrefs({ chartType: v })} />
+                  <button ref={mMoreRef} type="button" className={`term-mbar-btn ${mMore ? 'on' : ''}`} aria-expanded={mMore} aria-haspopup="menu" onClick={() => setMMore((v) => !v)}
+                    aria-label={String(t('charts.mbar.more'))} title={String(t('charts.mbar.more'))}>
+                    <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><circle cx="7" cy="14" r="2" /><circle cx="14" cy="14" r="2" /><circle cx="21" cy="14" r="2" /></svg>
+                  </button>
+                  <ChartPopover open={mMore} onClose={() => setMMore(false)} anchorRef={mMoreRef} width={232} label={String(t('charts.mbar.more'))} className="term-mbar-menu">
+                    {(() => {
+                      const go = (fn: () => void) => () => { setMMore(false); fn() }
+                      return (
+                        <>
+                          <button type="button" className="chart-pop-item" onClick={go(() => setSettingsOpen(true))}><IcFx size={16} /><span>{t('charts.indicators.button')}</span></button>
+                          <button type="button" className="chart-pop-item" onClick={go(() => setAlertMgrOpen(true))}><IcBell size={16} /><span>{t('charts.alert.manager')}</span>{activeAlertCount > 0 && <small>{activeAlertCount}</small>}</button>
+                          <button type="button" className="chart-pop-item" onClick={go(() => setShowPositions((v) => !v))}><IcEye size={16} off={!showPositions} /><span>{t(showPositions ? 'charts.mbar.hidePositions' : 'charts.mbar.showPositions')}</span></button>
+                          <button type="button" className="chart-pop-item" onClick={go(() => { void takeShot('save') })}><IcCamera size={16} /><span>{t('charts.shot.save')}</span></button>
+                          <button type="button" className="chart-pop-item" onClick={go(enterFullscreen)}><IcExpand size={16} /><span>{t('charts.fullscreen.enter')}</span></button>
+                          <button type="button" className="chart-pop-item" onClick={go(() => setChartSetOpen(true))}><IcGear size={16} /><span>{t('charts.settings.title')}</span></button>
+                          <button type="button" className="chart-pop-item" onClick={go(() => setLayout('pro'))}><IcSpark size={16} /><span>{t('charts.pro.enter')}</span></button>
+                        </>
+                      )
+                    })()}
+                  </ChartPopover>
+                  <span className="term-toolbar-divider" aria-hidden />
+                  <button type="button" className="term-mbar-btn" disabled={!drawLayerRef.current?.canUndo()} onClick={() => { drawLayerRef.current?.undo(); bumpDraw() }}
+                    aria-label={String(t('charts.mbar.undo'))} title={String(t('charts.mbar.undo'))}>
+                    <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10 7L5.5 11.5 10 16" /><path d="M5.5 11.5H17a6 6 0 010 12h-3" /></svg>
+                  </button>
+                  <button type="button" className="term-mbar-btn" disabled={!drawLayerRef.current?.canRedo()} onClick={() => { drawLayerRef.current?.redo(); bumpDraw() }}
+                    aria-label={String(t('charts.mbar.redo'))} title={String(t('charts.mbar.redo'))}>
+                    <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M18 7l4.5 4.5L18 16" /><path d="M22.5 11.5H11a6 6 0 000 12h3" /></svg>
+                  </button>
+                </>
+              )}
               <div className="term-tbr">
                 <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => { setSheetDockTab('positions'); setSheet('positions') }}>
                   {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
@@ -1510,6 +1565,30 @@ export default function ChartsPage() {
               />
             )}
 
+            {/* 手机经典版：底栏画笔打开的左侧悬浮画线栏（与桌面同一条 ProDrawRail）
+                Phone classic: the floating left draw bar opened by the bottom bar's pen (the same ProDrawRail as desktop) */}
+            {!pro && !isDesktop && !isFullscreen && mDraw && drawReady && (
+              <div className="term-mdraw no-sb">
+                <ProDrawRail
+                  drawLayerRef={drawLayerRef}
+                  bumpDraw={bumpDraw}
+                  t={t}
+                  measureOn={measureOn}
+                  onMeasure={() => { setZoomOn(false); setMeasureOn((v) => !v) }}
+                  zoomOn={zoomOn}
+                  onZoom={() => { setMeasureOn(false); setZoomOn((v) => !v) }}
+                  canZoomOut={zoomStack.length > 0}
+                  onZoomOut={zoomOut}
+                  indCount={shownList.length}
+                  indHidden={indAllHidden}
+                  onHideIndicators={hideAllIndicators}
+                  positionsShown={showPositions}
+                  onShowPositions={setShowPositions}
+                  onRemoveIndicators={removeAllIndicators}
+                />
+              </div>
+            )}
+
             {/* 专业版：顶部灵动岛（断线 / 警报触发）+ 手机画线条（标签栏「画线」开合）
                 Pro: the top island (offline / alert fired) + the phone draw strip (tab bar "Draw") */}
             {pro && !isFullscreen && (
@@ -1706,9 +1785,11 @@ export default function ChartsPage() {
               </button>
             </div>
             <div className="term-sheet-body no-sb">
+              {/* 手机「行情」抽屉用专业版同一张行情表（品种图标、多周期趋势、分组、列设置），
+                  两边不再各长各的 / The phone sheet uses the pro terminal's quote table so the two stay in sync */}
               {shownSheet === 'watchlist' && (
-                <WatchlistPanel
-                  className="flex min-h-0 flex-1 flex-col"
+                <ProWatchlist
+                  mobile
                   symbols={activeSymbols}
                   active={symbol}
                   onSelect={pickFromSheet}

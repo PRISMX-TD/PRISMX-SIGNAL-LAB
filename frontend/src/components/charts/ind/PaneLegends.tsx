@@ -159,7 +159,10 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
     return (
       <div key={inst.uid} className={`indl-row ${inst.hidden ? 'off' : ''} ${on ? 'on' : ''} ${drag?.uid === inst.uid ? 'dragging' : ''}`}
         onClick={() => setActive((a) => (a === inst.uid ? null : inst.uid))}
-        onDoubleClick={() => actions.settings(inst.uid)}>
+        onDoubleClick={() => actions.settings(inst.uid)}
+        // 鼠标中键（滚轮）点图例 = 删掉这个指标 / a middle (wheel) click on the legend removes the indicator
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+        onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); actions.remove(inst.uid) } }}>
         <span className="indl-nm" onPointerDown={(e) => startDrag(e, inst.uid)} title={String(t('charts.ind.ui.dragHint'))}>
           {def.abbr}{args && <span className="indl-args"> {args}</span>}{tf}
         </span>

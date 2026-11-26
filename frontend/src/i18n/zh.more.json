@@ -2143,6 +2143,15 @@
         "removeConfirm_indicators": "删除图上的全部 {{n}} 个指标？",
         "removeConfirm_all": "删除当前品种的全部 {{d}} 个画线和图上的 {{n}} 个指标？"
       }
+    },
+    "mbar": {
+      "symbol": "切换品种",
+      "draw": "画线工具",
+      "more": "更多",
+      "undo": "撤销",
+      "redo": "重做",
+      "showPositions": "显示持仓与订单",
+      "hidePositions": "隐藏持仓与订单"
     }
   },
   "winrate": {

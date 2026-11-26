@@ -22,7 +22,8 @@
 .term-shell.pt,
 .pt-cmd-ov,
 .chart-pop.pt-menu,
-.ptr-fly {
+.ptr-fly,
+.pt-wl--m {
   --pt-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --pt-bar: #111115;
   --pt-hover: rgb(255 255 255 / 0.07);
@@ -679,6 +680,29 @@ svg.pt-ava { display: block; border-radius: 0; }
 @media (hover: none) {
   .pt-wr-fav .fav-star { opacity: 1; }
 }
+/* 手机「行情」抽屉（经典版手机端也用这张表）：行 52px、代码下面一行中文名、标签与按钮放大到手指能点
+   Phone 行情 sheet (the classic phone shell uses this table too): 52px rows, the name under the
+   ticker, chips and buttons sized for fingers */
+.pt-wl--m .pt-wl-top { height: 50px; gap: 6px; padding: 0 10px 0 12px; }
+.pt-wl--m .pt-chips > button { height: 32px; padding: 0 13px; font-size: 13.5px; }
+.pt-wl--m .pt-icon.sm { width: 36px; height: 36px; border-radius: 9px; }
+.pt-wl--m .pt-wl-search { height: 36px; border-radius: 9px; }
+.pt-wl--m .pt-wl-search input { font-size: 16px; }
+.pt-wl--m .pt-wl-x { width: 30px; height: 30px; }
+.pt-wl--m .pt-wl-cols { padding: 0 10px 0 16px; }
+.pt-wl--m .pt-wl-gh { height: 34px; padding: 0 16px 0 12px; font-size: 12px; }
+.pt-wl--m .pt-wr { height: 52px; padding: 0 10px 0 16px; }
+.pt-wl--m .pt-wr-id { gap: 10px; }
+.pt-wl--m .pt-wr-ava { width: 26px; height: 26px; }
+.pt-wl--m .pt-wr-pick { display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; }
+.pt-wl--m .pt-wr-nm { overflow: hidden; color: var(--text-3); font: 400 12px/1.1 var(--pt-font); text-overflow: ellipsis; }
+.pt-wl--m .pt-wr-px { font-size: 14.5px; }
+.pt-wl--m .pt-wr-tr i { width: 6px; height: 14px; }
+/* 星标列放宽到 32（触屏下星标本身就是 32×32，见 dashboard.css）/ the star column widens to 32 (touch stars are 32×32) */
+.pt-wl--m .pt-wl-cols, .pt-wl--m .pt-wr { grid-template-columns: minmax(0, 1fr) 46px minmax(76px, auto) 32px; }
+.pt-wl--m.no-tr .pt-wl-cols, .pt-wl--m.no-tr .pt-wr { grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 32px; }
+.pt-wl--m.no-px .pt-wl-cols, .pt-wl--m.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 46px 32px; }
+.pt-wl--m.no-tr.no-px .pt-wl-cols, .pt-wl--m.no-tr.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 32px; }
 .pt-watch-list { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .pt-det {
   flex-shrink: 0;

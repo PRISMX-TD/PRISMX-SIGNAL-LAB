@@ -33,6 +33,9 @@ interface Props {
   onSelect: (symbol: string) => void
   digitsFor: (symbol: string) => number
   quotesDown?: boolean
+  // 手机抽屉（经典版手机端的「行情」）：行更高、代码下面带中文名、按钮放大到手指能点
+  // Phone sheet (the classic phone 行情 sheet): taller rows, the name under the ticker, finger-sized buttons
+  mobile?: boolean
 }
 
 // M1 只是参考箭头、不计入综合判断（见 SignalView），表里不占格
@@ -40,7 +43,7 @@ interface Props {
 const TFS = ['M5', 'M15', 'M30', 'H1', 'H4'] as const
 const GROUP_ORDER: SymbolCategory[] = [...SYMBOL_CATEGORIES, 'other']
 
-export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quotesDown = false }: Props) {
+export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quotesDown = false, mobile = false }: Props) {
   const { t } = useTranslation()
   const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
   const { trends } = useLive()
@@ -130,8 +133,9 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   // Keep the active row in view after a switch (from the palette or chart shortcuts too)
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-sym="${CSS.escape(active)}"]`)
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [active])
+    // 手机抽屉一打开就把当前品种放到中间，不贴着底边（底下常有浮层）/ phone sheet: centre it rather than hugging the bottom edge
+    el?.scrollIntoView({ block: mobile ? 'center' : 'nearest' })
+  }, [active, mobile])
 
   const onListKey = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
@@ -157,6 +161,7 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
       active={sym === active}
       showTrend={showTrend}
       showPrice={showPrice}
+      mobile={mobile}
       favEnabled={favEnabled}
       fav={favSet.has(sym)}
       onSelect={onSelect}
@@ -165,7 +170,7 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   )
 
   return (
-    <div className={`pt-wl ${quotesDown ? 'down' : ''} ${showTrend ? '' : 'no-tr'} ${showPrice ? '' : 'no-px'}`}>
+    <div className={`pt-wl ${mobile ? 'pt-wl--m' : ''} ${quotesDown ? 'down' : ''} ${showTrend ? '' : 'no-tr'} ${showPrice ? '' : 'no-px'}`}>
       <div className="pt-wl-top">
         {searching ? (
           <label className="pt-wl-search">
@@ -260,7 +265,7 @@ function CheckItem({ label, on, onToggle }: { label: string; on: boolean; onTogg
   )
 }
 
-const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, showTrend, showPrice, favEnabled, fav, onSelect, onToggleFav }: {
+const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, showTrend, showPrice, mobile, favEnabled, fav, onSelect, onToggleFav }: {
   sym: string
   ticks: WatchTicks
   trend: Trend | undefined
@@ -268,6 +273,7 @@ const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, sho
   active: boolean
   showTrend: boolean
   showPrice: boolean
+  mobile: boolean
   favEnabled: boolean
   fav: boolean
   onSelect: (symbol: string) => void
@@ -285,8 +291,9 @@ const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, sho
     <li className={`pt-wr ${active ? 'on' : ''}`} data-sym={sym}>
       <span className="pt-wr-id">
         <SymbolLogo symbol={sym} className="pt-wr-ava" />
-        <button type="button" className="pt-wr-pick" aria-current={active ? 'true' : undefined} onClick={() => onSelect(sym)} title={name !== sym ? name : undefined}>
+        <button type="button" className="pt-wr-pick" aria-current={active ? 'true' : undefined} onClick={() => onSelect(sym)} title={name !== sym && !mobile ? name : undefined}>
           {sym}
+          {mobile && name !== sym && <small className="pt-wr-nm">{name}</small>}
         </button>
       </span>
       {showTrend && (

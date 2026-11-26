@@ -23,6 +23,7 @@ import { createPortal } from 'react-dom'
 import type { DrawLayerHandle } from '../DrawLayer'
 import { TOOL_GROUPS, type Tool } from '../draw/model'
 import { DrawToolIcon, toolKeyHint } from '../DrawToolsRow'
+import { IcRuler as Ruler, IcZoom as Zoom, IcMagnet as Magnet, IcStay as Stay, IcLock as Lock, IcEye as Eye, IcTrash as Trash, IcTree as Tree } from '../draw/railIcons'
 import { usePrefs } from '../../../store/prefs'
 import { CHART_PREFS_NS } from '../useChartPrefs'
 import ConfirmModal from '../../ConfirmModal'
@@ -64,8 +65,7 @@ const GROUPS: Group[] = [
   { id: 'icons', tools: ['emoji'] },
 ]
 
-const ICON = 22
-const SW = 1.3
+const ICON = 26
 
 export default function ProDrawRail(p: Props) {
   const { drawLayerRef, bumpDraw, t } = p
@@ -135,7 +135,7 @@ export default function ProDrawRail(p: Props) {
               title={`${tt(`charts.draw.${shown}`)}${hint ? ` (${hint})` : ''}`}
               aria-label={tt(`charts.draw.${shown}`)}
             >
-              <DrawToolIcon tool={shown} size={ICON} sw={SW} />
+              <DrawToolIcon tool={shown} size={ICON} />
             </button>
             {multi && <Arrow label={grpLabel(g.id)} open={open === g.id} onClick={() => toggle(g.id)} />}
             {multi && (
@@ -145,7 +145,7 @@ export default function ProDrawRail(p: Props) {
                     {g.secs?.[tl] && <p className={`ptr-sec ${i === 0 ? 'first' : ''}`}>{secLabel(g.secs[tl]!)}</p>}
                     <div className={`ptr-row ${cur === tl ? 'on' : ''}`}>
                       <button type="button" className="ptr-item" onClick={() => pick(g.id, tl)}>
-                        <span className="ptr-ic"><DrawToolIcon tool={tl} size={ICON} sw={SW} /></span>
+                        <span className="ptr-ic"><DrawToolIcon tool={tl} size={ICON} /></span>
                         <span className="ptr-name">{tt(`charts.draw.${tl}`)}</span>
                         {toolKeyHint(tl) && <kbd>{toolKeyHint(tl)}</kbd>}
                       </button>
@@ -340,27 +340,15 @@ function Flyout({ open, anchor, onClose, label, children }: { open: boolean; anc
   )
 }
 
-// ── 工具栏自己的图标（28 格细线，和画线工具图标同一种线条）/ the bar's own icons (thin lines) ──
-const P = { width: ICON, height: ICON, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: SW, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
-const IcRuler = () => <svg {...P}><path d="M3.5 16.5L16.5 3.5l4 4-13 13z" /><path d="M7 13l1.8 1.8M9.5 10.5l1.2 1.2M12 8l1.8 1.8M14.5 5.5l1.2 1.2" /></svg>
-const IcZoom = ({ plus = false }: { plus?: boolean }) => <svg {...P}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.2 15.2L20.5 20.5M7.5 10.5h6" />{plus && <path d="M10.5 7.5v6" />}</svg>
-const IcMagnet = ({ strong }: { strong: boolean }) => (
-  <svg {...P}>
-    <path d="M6 4v8a6 6 0 0012 0V4h-3.5v8a2.5 2.5 0 01-5 0V4z" fill={strong ? 'currentColor' : 'none'} fillOpacity={strong ? 0.22 : 0} />
-    <path d="M6 7.5h3.5M14.5 7.5H18" />
-  </svg>
-)
-const IcStay = () => <svg {...P}><path d="M4.5 19.5l1-4L15 6l3 3-9.5 9.5z" /><path d="M13 8l3 3" /><path d="M15 20.5h5.5M18 17.5l2.5 3-2.5 3" /></svg>
-const IcLock = ({ locked }: { locked: boolean }) => <svg {...P}><rect x="5" y="10.5" width="14" height="10" rx="2" /><path d={locked ? 'M8 10.5V7.5a4 4 0 018 0v3' : 'M8 10.5V7.5a4 4 0 017.6-1.7'} /><path d="M12 14.5v2" /></svg>
-const IcEye = ({ off }: { off: boolean }) => (
-  <svg {...P}>
-    <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
-    <circle cx="12" cy="12" r="2.8" />
-    {off && <path d="M4 20L20 4" />}
-  </svg>
-)
-const IcTrash = () => <svg {...P}><path d="M4 6.5h16M9.5 6.5V4.5h5v2M6.5 6.5l1 13.5h9l1-13.5M10 10.5v6M14 10.5v6" /></svg>
-const IcTree = () => <svg {...P}><rect x="3.5" y="3.5" width="6" height="5" rx="1" /><path d="M6.5 8.5V18h4M6.5 13h4M13.5 13h7M13.5 18h7" /></svg>
+// ── 工具栏自己的图标在 draw/railIcons（与画线图标同一套 28 格细线）/ the bar's own icons live in draw/railIcons ──
+const IcRuler = () => <Ruler size={ICON} />
+const IcZoom = ({ plus = false }: { plus?: boolean }) => <Zoom size={ICON} plus={plus} />
+const IcMagnet = ({ strong }: { strong: boolean }) => <Magnet size={ICON} strong={strong} />
+const IcStay = () => <Stay size={ICON} />
+const IcLock = ({ locked }: { locked: boolean }) => <Lock size={ICON} locked={locked} />
+const IcEye = ({ off }: { off: boolean }) => <Eye size={ICON} off={off} />
+const IcTrash = () => <Trash size={ICON} />
+const IcTree = () => <Tree size={ICON} />
 const IcCheck = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ptr-check" aria-hidden><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
 const IcStar = ({ filled }: { filled: boolean }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden>

@@ -16,7 +16,7 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
-import { symbolMeta } from '../../utils/symbolMeta'
+import SymbolLogo from './pro/SymbolLogo'
 import { useClock } from '../signals/hooks'
 import { intervalLabel } from './intervals'
 import { EMPTY } from '../../utils/format'
@@ -97,13 +97,13 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
   // the chart's last-price label and the ticket's SELL price.
   const headline = bid ?? (fallbackPrice || null)
   const parts = splitPrice(headline, digits)
-  const meta = symbolMeta(symbol)
   const ivLabel = intervalLabel(interval)
 
   return (
     <div className={`term-qs ${quotesDown ? 'quotes-down' : ''}`}>
       <button type="button" className="term-qs-id" onClick={onSymbolClick} aria-label={String(t('charts.watchlist.title'))}>
-        <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+        {/* 品种图标与专业版同一套（外汇双国旗、商品与币种图形）/ same symbol logos as the pro terminal */}
+        <SymbolLogo symbol={symbol} size={30} className="sym-ava" />
         <div>
           <h2>
             {symbol || EMPTY}

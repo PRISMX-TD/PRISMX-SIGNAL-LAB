@@ -57,6 +57,9 @@ export interface DrawLayerHandle {
   unlockAll: () => void
   undo: () => void
   redo: () => void
+  // 当前品种还能不能撤销 / 重做（手机底栏的按钮用）/ whether undo / redo is possible for this symbol (phone bottom bar)
+  canUndo: () => boolean
+  canRedo: () => boolean
   // 磁吸：画线时把点吸到 K 线的开高低收上（weak = 靠近才吸，strong = 总是吸）
   // Magnet: snap points to the bar's OHLC while drawing (weak = when close, strong = always)
   magnet: MagnetMode
@@ -453,6 +456,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     tool, setTool, color, setColor, selectedId: sel[0] ?? null, selectedCount: sel.length,
     drawCount: drawings.length, lockedCount, stayInDraw, setStayInDraw, visible, setVisible, getDrawings: () => drawingsRef.current,
     deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet,
+    canUndo: () => (stacksRef.current.get(symRef.current)?.u.length ?? 0) > 0,
+    canRedo: () => (stacksRef.current.get(symRef.current)?.r.length ?? 0) > 0,
     favorites, toggleFavorite, treeOpen, toggleTree,
   }), [tool, setTool, color, sel, drawings.length, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet, favorites, toggleFavorite, treeOpen, toggleTree])
   const onStateChangeRef = useRef(onStateChange)
@@ -687,6 +692,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
     const { x, y } = localXY(e)
     const cur = toolRef.current
+    // 鼠标中键（滚轮）点在画线上 = 删掉它；它在多选里就删整组选中的
+    // A middle (wheel) click on a drawing deletes it; if it's part of the selection, the whole selection goes
+    if (e.pointerType === 'mouse' && e.button === 1) {
+      e.preventDefault()
+      if (!isPointer(cur) || createRef.current) return
+      const hit = primRef.current?.hitAt(x, y)
+      if (!hit) return
+      if (!selRef.current.includes(hit.d.id)) select([hit.d.id])
+      deleteSelected()
+      setCtxMenu(null)
+      return
+    }
     e.currentTarget.setPointerCapture?.(e.pointerId)
     setCtxMenu(null)
 
@@ -790,7 +807,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       k: 'move', pointerId: e.pointerId, startX: x, startY: y, slop, active: false,
       ids: movable, orig, clone: multi, clickId: d.id, toggle: (multi || e.shiftKey) && inSel,
     }
-  }, [cancelCreate, updateCreate, snap, toPoint, newDrawing, finishCreate, finishPoly, showTemp, select, pxOf, chart]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cancelCreate, updateCreate, snap, toPoint, newDrawing, finishCreate, finishPoly, showTemp, select, deleteSelected, pxOf, chart]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 交互层接管指针时图表收不到移动事件，十字光标会停住：这里替它跟上（画线 / 拉手柄时跟着磁吸后的点）
   // While the layer holds the pointer the chart gets no moves and its crosshair freezes: drive it from
@@ -1288,6 +1305,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
         className="pointer-events-none absolute inset-1.5 z-10 touch-none"
         style={{ display: visible ? '' : 'none', cursor: cursorStyle || (!isPointer(tool) ? 'crosshair' : 'default') }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}
+        // 中键按下时浏览器会进「自动滚动」，挡掉 / stop the browser's middle-button autoscroll
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+        onAuxClick={(e) => { if (e.button === 1) e.preventDefault() }}
         onContextMenu={(e) => {
           e.preventDefault()
           // 画到一半右键 = 取消这一笔 / a right-click mid-stroke cancels it

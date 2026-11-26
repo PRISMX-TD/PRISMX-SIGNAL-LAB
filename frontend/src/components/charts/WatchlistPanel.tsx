@@ -24,7 +24,7 @@ import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore }
 import { useTranslation } from 'react-i18next'
 import { useGlobalQuotesPeek, useGlobalQuotesSubscribe } from '../../store/live'
 import { displaySymbol } from '../../api/utils'
-import { symbolMeta } from '../../utils/symbolMeta'
+import SymbolLogo from './pro/SymbolLogo'
 import { FavoriteStar, SymbolTabBar, useSymbolTabs } from '../signals/SymbolTabs'
 import { createWatchTicks, type Dir, type WatchTicks } from './watchTicks'
 import { EMPTY } from '../../utils/format'
@@ -142,10 +142,9 @@ const WatchRow = memo(function WatchRow({ sym, ticks, digits, active, favEnabled
   const subscribe = useCallback((cb: () => void) => ticks.subscribe(sym, cb), [ticks, sym])
   const get = useCallback(() => ticks.get(sym), [ticks, sym])
   const { bid, dir, hist } = useSyncExternalStore(subscribe, get, get)
-  const meta = symbolMeta(sym)
   return (
     <li className={`term-wr ${favEnabled ? 'has-fav' : ''} ${active ? 'on' : ''}`}>
-      <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }} aria-hidden="true">{meta.letter}</span>
+      <SymbolLogo symbol={sym} size={24} className="sym-ava" />
       <span>
         <button
           type="button"
