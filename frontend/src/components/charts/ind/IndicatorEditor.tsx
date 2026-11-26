@@ -19,6 +19,7 @@ import { intervalLabel } from '../intervals'
 import type { CandleColors } from '../chartConfig'
 import ColorPicker from './ColorPicker'
 import { approxSeconds } from './compute'
+import { useIndPresets } from './presets'
 import { defOf, defaultInputs } from './registry'
 import { fillStyle, hlineStyle, instArgs, plotStyle, resolveColor } from './style'
 import {
@@ -82,6 +83,17 @@ export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, 
   const snapshot = useRef(inst)
   const [tab, setTab] = useState<'inputs' | 'style' | 'vis'>('inputs')
   const [menu, setMenu] = useState(false)
+  const [tplName, setTplName] = useState('')
+  // 这种指标的模板（跨设备同步）/ this kind's templates (synced)
+  const presets = useIndPresets(inst?.type ?? '')
+  const menuRef = useRef<HTMLSpanElement>(null)
+  // 点菜单外面就收起 / close the menu on an outside press
+  useEffect(() => {
+    if (!menu) return
+    const onDown = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false) }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [menu])
   useScrollLock(!closing)
   const dlgRef = useRef<HTMLDivElement>(null)
   const cancel = () => { if (snapshot.current) onChange(snapshot.current); onClose() }
@@ -285,10 +297,36 @@ export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, 
         </div>
         {tab === 'inputs' ? inputs : tab === 'style' ? style : <div className="inde-body no-sb">{VIS_KINDS.map(visRow)}</div>}
         <div className="ind-ft">
-          <span className="inde-def">
-            <button type="button" className="ind-btn" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>{tt('charts.ind.ui.defaults')}</button>
+          {/* 模板：另存当前参数和样式、套用 / 删除已存的；下面是默认值三项
+              Templates: save the current inputs and styles, apply or delete saved ones; the three default actions below */}
+          <span className="inde-def" ref={menuRef}>
+            <button type="button" className="ind-btn" aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu((v) => !v)}>{tt('charts.ind.ui.presets')}</button>
             {menu && (
-              <span className="inde-menu" role="menu">
+              <span className="inde-menu inde-tpl" role="menu">
+                <form className="inde-tpl-save" onSubmit={(e) => {
+                  e.preventDefault()
+                  const name = tplName.trim()
+                  if (!name) return
+                  presets.save({ name, inputs: inst.inputs, styles: inst.styles })
+                  setTplName('')
+                }}>
+                  <input value={tplName} onChange={(e) => setTplName(e.target.value)} maxLength={40} placeholder={tt('charts.cs.tplName')} aria-label={tt('charts.cs.tplName')} />
+                  <button type="submit" disabled={!tplName.trim()}>{tt('charts.cs.tplSave')}</button>
+                </form>
+                {presets.list.length === 0
+                  ? <small className="inde-tpl-empty">{tt('charts.ind.ui.presetEmpty')}</small>
+                  : presets.list.map((x) => (
+                    <span key={x.name} className="inde-tpl-row">
+                      <button type="button" role="menuitem" title={tt('charts.cs.tplApply')} onClick={() => {
+                        onChange({ ...inst, inputs: { ...defaultInputs(def), ...x.inputs }, styles: { ...x.styles } })
+                        setMenu(false)
+                      }}>{x.name}</button>
+                      <button type="button" className="inde-tpl-del" aria-label={tt('charts.cs.tplDelete', { name: x.name })} onClick={() => presets.remove(x.name)}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    </span>
+                  ))}
+                <span className="inde-tpl-sep" />
                 <button type="button" role="menuitem" onClick={() => {
                   const d = layout.defaults[inst.type]
                   onChange({ ...inst, inputs: { ...defaultInputs(def), ...(d?.inputs ?? {}) }, styles: { ...(d?.styles ?? {}) } })

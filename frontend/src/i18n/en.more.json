@@ -1861,7 +1861,9 @@
         "dragHint": "Drag to another pane; double-click for settings",
         "newPane": "New pane",
         "legendCollapse": "Collapse indicators",
-        "legendExpand": "Expand indicators"
+        "legendExpand": "Expand indicators",
+        "presets": "Templates",
+        "presetEmpty": "No templates yet. Name the current inputs and styles to save them, then apply them in one click."
       },
       "mk": {
         "cp_doji": "Doji",

@@ -73,7 +73,7 @@ function cleanStyle(raw: unknown): PlotStyle {
   return s
 }
 
-function cleanStyles(raw: unknown): Record<string, PlotStyle> {
+export function cleanStyles(raw: unknown): Record<string, PlotStyle> {
   const out: Record<string, PlotStyle> = {}
   for (const [k, v] of Object.entries(obj(raw)).slice(0, 40)) {
     const s = cleanStyle(v)

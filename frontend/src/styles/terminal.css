@@ -3030,6 +3030,31 @@
 @media (hover: hover) and (pointer: fine) {
   .inde-menu button:hover, .indl-menu button:hover { background: var(--surface-2); color: var(--text-strong); }
 }
+/* 指标模板菜单：顶上一行「名称 + 保存」，下面是已存的模板（点名字套用、× 删除），再下面是默认值三项
+   Indicator template menu: a name + save row on top, saved templates (click to apply, × to delete), then the default actions */
+.inde-menu.inde-tpl { width: 280px; max-height: min(420px, 60dvh); overflow-y: auto; }
+.inde-tpl-save { display: flex; gap: 6px; padding: 4px 4px 6px; }
+.inde-tpl-save input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--nest);
+  box-shadow: inset 0 0 0 1px var(--line-control);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 13px;
+}
+.inde-tpl-save input:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--purple); }
+.inde-menu .inde-tpl-save button { height: 32px; padding: 0 12px; background: var(--purple); color: var(--text-strong); text-align: center; }
+.inde-menu .inde-tpl-save button:disabled { opacity: 0.4; cursor: not-allowed; }
+.inde-tpl-empty { padding: 4px 12px 8px; color: var(--text-3); font-size: 12px; line-height: 1.5; white-space: normal; }
+.inde-tpl-row { display: flex; align-items: center; }
+.inde-tpl-row > button:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.inde-menu .inde-tpl-del { display: grid; place-items: center; width: 30px; padding: 0; color: var(--text-3); }
+.inde-tpl-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 
 /* ── 取色器 / colour picker ── */
 .cp-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: var(--r-md); background: var(--nest); cursor: pointer; box-shadow: inset 0 0 0 1px var(--line-control); }

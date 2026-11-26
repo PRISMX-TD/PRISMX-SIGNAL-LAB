@@ -1861,7 +1861,9 @@
         "dragHint": "按住拖到其他窗格；双击打开设置",
         "newPane": "新窗格",
         "legendCollapse": "收起指标",
-        "legendExpand": "展开指标"
+        "legendExpand": "展开指标",
+        "presets": "模板",
+        "presetEmpty": "还没有模板。给现在的参数和样式起个名字存下来，之后一键套用。"
       },
       "mk": {
         "cp_doji": "十字星",

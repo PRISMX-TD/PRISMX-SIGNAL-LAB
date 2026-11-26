@@ -1861,7 +1861,9 @@
         "dragHint": "Kéo sang khung khác; nhấp đúp để cài đặt",
         "newPane": "Khung mới",
         "legendCollapse": "Thu gọn chỉ báo",
-        "legendExpand": "Mở rộng chỉ báo"
+        "legendExpand": "Mở rộng chỉ báo",
+        "presets": "Mẫu",
+        "presetEmpty": "Chưa có mẫu nào. Đặt tên cho tham số và kiểu hiện tại để lưu, sau đó áp dụng chỉ với một lần nhấp."
       },
       "mk": {
         "cp_doji": "Doji",
