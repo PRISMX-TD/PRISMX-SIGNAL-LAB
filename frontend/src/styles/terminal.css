@@ -2550,9 +2550,18 @@
   background: var(--surface-float);
   box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
 }
-.draw-favs .term-tool-btn { width: 28px; height: 28px; }
-.draw-favs-grip { display: grid; place-items: center; width: 14px; height: 28px; color: var(--text-3); cursor: grab; touch-action: none; }
+/* 收藏工具栏的图标比左栏大一号，手机上再大一号（手指好点）/ favourites bar icons one size up, bigger again on phones */
+.draw-favs .term-tool-btn { width: 34px; height: 34px; }
+.draw-favs .term-tool-btn svg { width: 22px; height: 22px; }
+.draw-favs-grip { display: grid; place-items: center; width: 14px; height: 34px; color: var(--text-3); cursor: grab; touch-action: none; }
 .draw-favs-grip:active { cursor: grabbing; }
+@media (max-width: 767px), (pointer: coarse) {
+  .draw-favs { gap: 4px; padding: 4px 6px 4px 3px; }
+  .draw-favs .term-tool-btn { width: 42px; height: 42px; }
+  .draw-favs .term-tool-btn svg { width: 27px; height: 27px; }
+  .draw-favs-grip { width: 18px; height: 42px; }
+  .draw-favs-grip svg { width: 10px; height: 18px; }
+}
 
 @media (max-width: 767px) {
   .draw-fbar { top: 6px; }
