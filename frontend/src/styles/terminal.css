@@ -3063,6 +3063,9 @@
 .cp-k { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .cp-range { flex: 1; min-width: 0; height: 18px; margin: 0; accent-color: var(--cp-c, var(--purple-hi)); cursor: pointer; }
 .cp-v { width: 38px; font: 500 12px var(--font-mono); color: var(--text-2); text-align: right; }
+/* 不透明度输入框：与 R/G/B 同款，% 在右 / opacity field, same look as R/G/B, % on the right */
+.cp-ch.cp-op { flex: 0 0 64px; padding: 0 8px 0 0; }
+.cp-ch.cp-op input { padding: 0 2px 0 6px; }
 
 /* ── 窗格图例 / pane legends ── */
 .indl-root { display: contents; }

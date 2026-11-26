@@ -129,10 +129,39 @@ export function ColorPanel({ color, opacity, onChange, resolved, presets }: {
           <input className="cp-range" type="range" min={0} max={100} step={1} value={opacity} aria-label={String(t('charts.ind.ui.opacity'))}
             style={{ ['--cp-c' as string]: HEX.test(shown) ? shown : '#888888' }}
             onChange={(e) => onChange(color, Number(e.target.value))} />
-          <span className="cp-v">{opacity}%</span>
+          <OpacityInput value={opacity} label={String(t('charts.ind.ui.opacity'))} onChange={(o) => onChange(color, o)} />
         </div>
       )}
     </>
+  )
+}
+
+// 不透明度也能直接输入 %：边打边生效，清空或超出 0–100 时不回写，失焦恢复成当前值
+// Opacity can be typed as a %: applies as you type; empty / out-of-range text isn't written back
+// and blurring restores the current value
+function OpacityInput({ value, label, onChange }: { value: number; label: string; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+  const shown = focused ? text : String(value)
+  return (
+    <label className="cp-ch cp-op">
+      <input
+        type="number"
+        min={0}
+        max={100}
+        inputMode="numeric"
+        value={shown}
+        aria-label={label}
+        onFocus={(e) => { setText(String(value)); setFocused(true); e.target.select() }}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => {
+          setText(e.target.value)
+          const n = Number(e.target.value)
+          if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100) onChange(Math.round(n))
+        }}
+      />
+      <span>%</span>
+    </label>
   )
 }
 

@@ -14,6 +14,8 @@ import type { MainSeriesApi } from '../useChartEngine'
 import { type Drawing, visibleOn, isScreenAnchored } from './model'
 import { timeToX, barsBetween } from './coords'
 import type { Bar } from './paint'
+import { intrabarBars, subscribeIntrabar } from './intrabar'
+import { barSpacingSeconds } from '../chartConfig'
 import {
   type DrawEnv, type DrawLabels, type Px, anchorsOf, anchorsValid, renderDrawing, handlesOf, hitDrawing,
   handleROf, tolOf,
@@ -27,6 +29,8 @@ export interface DrawScene {
   qty: (riskAmount: number, slDist: number, ref: number) => number | null
   pips: (dp: number) => number | null
   interval: string
+  // 成交量分布去取同品种的小周期 K 线 / volume profiles fetch this symbol's lower-timeframe bars
+  symbol: string
   touch: boolean
 }
 
@@ -79,8 +83,12 @@ export class DrawingsPrimitive {
     this._chart = p.chart
     this._series = p.series
     this._ru = p.requestUpdate
+    // 成交量分布的小周期数据到了就重画 / repaint when a volume profile's lower-timeframe data lands
+    this._unsubIntrabar?.()
+    this._unsubIntrabar = subscribeIntrabar(() => this.requestUpdate())
   }
-  detached() { this._chart = null; this._series = null; this._ru = null }
+  detached() { this._unsubIntrabar?.(); this._unsubIntrabar = null; this._chart = null; this._series = null; this._ru = null }
+  private _unsubIntrabar: (() => void) | null = null
   requestUpdate() { this._ru?.() }
 
   paneViews(): readonly IPrimitivePaneView[] { return this._pv }
@@ -157,6 +165,13 @@ export class DrawingsPrimitive {
         return out
       },
       ohlc: (t0, t1) => barsBetweenTimes(s, chart, t0, t1),
+      intrabar: (t0, tLast, key) => {
+        // 区间右端 = 最后一根图表 K 线收线的时刻 / the range ends where the last chart bar closes
+        const sec = barSpacingSeconds(sc.interval)
+        if (!sec) return null
+        const r = intrabarBars(sc.symbol, sc.interval, t0, Number.isFinite(tLast) ? tLast + sec : Infinity, key)
+        return r ? r.bars.map((b) => ({ x: NaN, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v ?? 0 })) : null
+      },
       spacing: c.timeScale().options().barSpacing,
       redraw: () => this.requestUpdate(),
     }

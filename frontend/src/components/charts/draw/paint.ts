@@ -27,6 +27,13 @@ export interface DrawEnv {
   closes?: (t0: number, t1: number) => { x: number; c: number }[]
   // 两个时间之间每根 K 线的完整数据（含 tick 量；成交量分布、VWAP 用）/ full bars between two times, tick volume included
   ohlc?: (t0: number, t1: number) => Bar[]
+  // 从 t0 那根图表 K 线到 tLast 那根（含，Infinity = 到最新）之间比图表周期小的 K 线（成交量分布用，
+  // 对标 TradingView）；还没到 / 用不了时 null。返回的 x 为 NaN，由调用方按所在的图表 K 线补上。
+  // key 是画线 id（防抖用）。
+  // Lower-timeframe bars from the chart bar at t0 through the one at tLast (inclusive; Infinity = up to
+  // the newest) for volume profiles, TradingView-style; null while loading or unavailable. x comes back
+  // NaN for the caller to fill from the chart bar it falls in; key = drawing id (debouncing).
+  intrabar?: (t0: number, tLast: number, key: string) => Bar[] | null
   // 当前一根 K 线占多少像素 / pixels per bar right now
   spacing?: number
   // 异步资源（图片）到了之后请求重画 / ask for a repaint once an async resource (an image) arrives

@@ -102,8 +102,12 @@ export function developing(bars: Bar[], pr: Profile, vaPct: number): DevPoint[] 
   const tot = new Array<number>(n).fill(0)
   const any = bars.some((b) => b.v > 0)
   const out: DevPoint[] = []
-  for (const b of bars) {
+  for (let k = 0; k < bars.length; k++) {
+    const b = bars[k]
     spread(b, volOf(b, any), pr.lo, pr.rowH, n, tot)
+    // 小周期 K 线同一根图表 K 线里有好几根（x 相同）：只在那根图表 K 线的最后一根出一个点
+    // Several lower-timeframe bars share one chart bar's x: emit one point at the last of them
+    if (k + 1 < bars.length && bars[k + 1].x === b.x) continue
     let poc = 0
     for (let i = 1; i < n; i++) if (tot[i] > tot[poc]) poc = i
     const [a, z] = valueAreaTv(tot, poc, vaPct)
@@ -260,21 +264,59 @@ const tickOf = (env: DrawEnv) => {
 function rangeOf(d: Drawing, env: DrawEnv, px: Px[], anchored: boolean) {
   const t0 = anchored ? d.pts[0].t : Math.min(d.pts[0].t, d.pts[1].t)
   const t1 = anchored ? Infinity : Math.max(d.pts[0].t, d.pts[1].t)
-  const bars = env.ohlc?.(t0, t1) ?? []
+  const chartBars = env.ohlc?.(t0, t1) ?? []
   const o = vpOf(d)
-  const pr = volumeProfile(bars, o.layout === 'ticks' ? { tick: tickOf(env), ticks: o.ticks } : rowsOf(d), o.vaPct)
-  const xs = bars.map((b) => b.x).filter(Number.isFinite)
+  // 有区间内的小周期 K 线就用它算分布（对标 TradingView），x 取所在那根图表 K 线的；还没到就先用图表 K 线
+  // Lower-timeframe bars when available (TradingView-style), x from the chart bar each falls in;
+  // chart bars until they arrive
+  let bars = chartBars
+  if (chartBars.length && env.intrabar) {
+    const ib = env.intrabar(chartBars[0].t, anchored ? Infinity : chartBars[chartBars.length - 1].t, d.id)
+    if (ib && ib.length) bars = placeIntrabar(ib, chartBars)
+  }
+  const rows = o.layout === 'ticks' ? { tick: tickOf(env), ticks: o.ticks } : rowsOf(d)
+  const pr = profileMemo(d.id, bars, rows, o.vaPct)
+  const xs = chartBars.map((b) => b.x).filter(Number.isFinite)
   const xa = anchored ? px[0].x : Math.min(px[0].x, px[1].x)
   const xb = anchored ? (xs.length ? Math.max(...xs) : px[0].x) : Math.max(px[0].x, px[1].x)
   return { pr, bars, xa, xb, o }
+}
+
+/** 小周期 K 线的 x = 它所在那根图表 K 线（开盘时间 <= 它的最后一根）的 x
+ *  A lower-timeframe bar's x is that of the chart bar it falls in (the last one opening at or before it) */
+export function placeIntrabar(ib: Bar[], chart: Bar[]): Bar[] {
+  const out: Bar[] = []
+  let j = 0
+  for (const b of ib) {
+    while (j + 1 < chart.length && chart[j + 1].t <= b.t) j++
+    if (b.t < chart[0].t) continue
+    out.push({ ...b, x: chart[j].x })
+  }
+  return out
+}
+
+// 每条画线记住上一次的分布：鼠标移动的命中测试、十字光标重画都不用重算几千根小周期 K 线
+// Each drawing remembers its last profile, so hit tests on mouse moves and crosshair repaints
+// don't recompute thousands of lower-timeframe bars
+const memo = new Map<string, { key: string; pr: Profile | null }>()
+function profileMemo(id: string, bars: Bar[], rows: number | { tick: number; ticks: number }, vaPct: number): Profile | null {
+  const a = bars[0], z = bars[bars.length - 1]
+  const key = bars.length ? `${bars.length}|${a.t}|${z.t}|${z.h}|${z.l}|${z.c}|${z.v}|${JSON.stringify(rows)}|${vaPct}` : 'empty'
+  const hit = memo.get(id)
+  if (hit && hit.key === key) return hit.pr
+  const pr = volumeProfile(bars, rows, vaPct)
+  if (memo.size > 64) memo.clear()
+  memo.set(id, { key, pr })
+  return pr
 }
 function vpRender(anchored: boolean) {
   return (ctx: CanvasRenderingContext2D, d: Drawing, px: Px[], env: DrawEnv, hot: boolean) => {
     const { pr, bars, xa, xb } = rangeOf(d, env, px, anchored)
     if (!pr) { guide(ctx, d.color, anchored ? [px[0], { x: env.w, y: px[0].y }] : [px[0], px[1]]); return }
     const box = profileBox(env, pr, xa, xb)
+    // 选中 / 悬停时只描一圈虚线框标出区间，不铺底色（底色只由「直方图框底色」决定）
+    // Selected / hovered: just a dashed outline marking the range, no fill (only "box background" fills it)
     if (box && hot) {
-      ctx.save(); ctx.fillStyle = withAlpha(d.color, 0.05); ctx.fillRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1); ctx.restore()
       guide(ctx, d.color, [{ x: box.x1, y: box.y1 }, { x: box.x2, y: box.y1 }, { x: box.x2, y: box.y2 }, { x: box.x1, y: box.y2 }, { x: box.x1, y: box.y1 }], 0.4)
     }
     paintProfile(ctx, d, env, pr, bars, xa, xb)

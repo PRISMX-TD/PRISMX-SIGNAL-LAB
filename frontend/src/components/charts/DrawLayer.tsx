@@ -225,6 +225,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     qty: (riskAmt, sl, refP) => rawVolumeByRisk(symbol, riskAmt, 100, sl, refP),
     pips: (dp) => toPips(symbol, dp),
     interval,
+    symbol,
     touch: isTouchDevice,
   }), [fmtPrice, fmtTime, labels, theme, symbol, interval])
   const sceneRef = useRef(scene)
