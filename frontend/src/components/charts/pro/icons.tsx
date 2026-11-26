@@ -36,6 +36,10 @@ export const IcKeyboard = (p: P) => <Svg {...p}><rect x="2.5" y="6" width="19" h
 export const IcCalendar = (p: P) => <Svg {...p}><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></Svg>
 export const IcMore = (p: P) => <Svg {...p}><circle cx="5" cy="12" r="1.3" fill="currentColor" /><circle cx="12" cy="12" r="1.3" fill="currentColor" /><circle cx="19" cy="12" r="1.3" fill="currentColor" /></Svg>
 export const IcPanel = (p: P) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M15 4v16" /></Svg>
+// 数据窗口：表格读数 / data window: tabular readouts
+export const IcData = (p: P) => <Svg {...p}><rect x="3.5" y="4" width="17" height="16" rx="2.5" /><path d="M9 4v16M3.5 10H9M13 9h4.5M13 13h4.5M13 17h3" /></Svg>
+// 对象树 / object tree
+export const IcTree = (p: P) => <Svg {...p}><path d="M6 5v13a2 2 0 002 2h3M6 9.5h5" /><rect x="11" y="6.5" width="9" height="5" rx="1.5" /><rect x="11" y="15" width="9" height="5" rx="1.5" /><circle cx="6" cy="4" r="1.2" /></Svg>
 export const IcDock = (p: P) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M3 14h18" /></Svg>
 export const IcClassic = (p: P) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M8.5 4v16M15.5 4v16" /></Svg>
 export const IcSpark = (p: P) => <Svg {...p}><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></Svg>

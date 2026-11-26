@@ -10,8 +10,9 @@ import { CHART_PREFS_NS } from '../useChartPrefs'
 export const PRO_PREFS_KEY = 'pro'
 
 export type ProLayout = 'classic' | 'pro'
-export type ProWidget = 'watch' | 'trade' | 'alerts'
-export const PRO_WIDGETS: readonly ProWidget[] = ['watch', 'trade', 'alerts']
+// data = 数据窗口，tree = 画线对象树（阶段 6）/ data = data window, tree = drawing object tree (phase 6)
+export type ProWidget = 'watch' | 'trade' | 'alerts' | 'data' | 'tree'
+export const PRO_WIDGETS: readonly ProWidget[] = ['watch', 'trade', 'alerts', 'data', 'tree']
 
 export interface ProPrefs {
   layout: ProLayout

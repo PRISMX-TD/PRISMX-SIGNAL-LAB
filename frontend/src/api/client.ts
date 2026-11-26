@@ -5,6 +5,7 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { PendingCompetition } from './types'
 import type { MarketStatus } from './types'
 import type { ChartAlert, ChartAlertIn, ChartAlertLogItem, ChartDrawingSymbol, ChartDrawingsOut, ChartDrawingsSaved } from './types'
+import type { ChartBatchOut, ChartDayRef, ChartLayout, ChartRangeOut, ChartSessions, ChartSymbolSpec } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -825,6 +826,34 @@ export const chartApi = {
     request<{ deleted: number }>('/chart/alerts/delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   alertLog: (limit = 100) => request<{ log: ChartAlertLogItem[] }>(`/chart/alerts/log?limit=${limit}`),
   clearAlertLog: () => request<{ ok: boolean }>('/chart/alerts/log', { method: 'DELETE' }),
+  // ---- 阶段 6（后端 rev 57）/ phase 6 (backend rev 57) ----
+  // 按时间范围取 K 线（含两端，升序，最多 limit≤5000 根，超出时 truncated=true 且保留最新的一段）。
+  // 回放和跳转日期用。每用户每分钟 60 次。
+  // Candles in [from, to] inclusive, ascending, at most limit (≤5000); when cut, truncated=true and
+  // the newest part is kept. Used by replay and go-to-date. 60/min per user.
+  range: (symbol: string, interval: string, from: number, to: number, limit = 5000) =>
+    request<ChartRangeOut>(
+      `/chart/range?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&from=${Math.floor(from)}&to=${Math.floor(to)}&limit=${limit}`
+    ),
+  // 多个品种同一周期的最新一页（≤8 个品种，limit≤1000）。对比品种和多图首屏用，只算一次限流。
+  // Latest page for up to 8 symbols on one interval (limit≤1000); compare + multi-chart first load, one rate-limit hit.
+  batch: (symbols: string[], interval: string, limit = 500) =>
+    request<ChartBatchOut>(
+      `/chart/batch?symbols=${symbols.map(encodeURIComponent).join(',')}&interval=${encodeURIComponent(interval)}&limit=${limit}`
+    ),
+  sessions: (symbol: string) => request<ChartSessions>(`/chart/sessions?symbol=${encodeURIComponent(symbol)}`),
+  spec: (symbol: string) => request<ChartSymbolSpec>(`/chart/spec?symbol=${encodeURIComponent(symbol)}`),
+  // 全部活跃品种的日内涨跌基准（后端缓存 60 秒）/ day-change refs for all active symbols (cached 60 s server-side)
+  dayRefs: () => request<{ items: Record<string, ChartDayRef> }>('/chart/day-refs'),
+  // 图表布局：最多 30 份，每份 data ≤64KB。写入后推 WS CHART_LAYOUTS_UPDATE。
+  // Chart layouts: at most 30, data ≤64KB each. Writes push WS CHART_LAYOUTS_UPDATE.
+  listLayouts: () => request<{ layouts: ChartLayout[] }>('/chart/layouts'),
+  createLayout: (name: string, data: unknown) =>
+    request<ChartLayout>('/chart/layouts', { method: 'POST', body: JSON.stringify({ name, data }) }),
+  updateLayout: (id: string, body: { name?: string; data?: unknown }) =>
+    request<ChartLayout>(`/chart/layouts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteLayout: (id: string) =>
+    request<{ deleted: boolean }>(`/chart/layouts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 // 下单 / Orders

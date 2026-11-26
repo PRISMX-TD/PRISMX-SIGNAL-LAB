@@ -14,6 +14,8 @@ interface Props {
   onReorder: (id: string, how: 'up' | 'down') => void
   onSettings: (id: string) => void
   onClose: () => void
+  // 停靠在专业版右栏（不浮在图上、没有关闭钮）/ docked in the pro right panel (not floating, no close button)
+  docked?: boolean
   t: (k: string, o?: Record<string, unknown>) => unknown
 }
 
@@ -23,15 +25,15 @@ const EYE_OFF = 'M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0
 const LOCK = 'M5 11h14v10H5zM8 11V7a4 4 0 018 0v4'
 const UNLOCK = 'M5 11h14v10H5zM8 11V7a4 4 0 017.8-1.2'
 
-export default function DrawObjectTree({ drawings, selected, onSelect, onPatch, onDelete, onReorder, onSettings, onClose, t }: Props) {
+export default function DrawObjectTree({ drawings, selected, onSelect, onPatch, onDelete, onReorder, onSettings, onClose, docked = false, t }: Props) {
   const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
   const rows = [...drawings].reverse()
   return (
-    <div className="draw-tree" role="dialog" aria-label={tt('charts.draw.objectTree')} onPointerDown={(e) => e.stopPropagation()}>
+    <div className={`draw-tree${docked ? ' docked' : ''}`} role={docked ? 'region' : 'dialog'} aria-label={tt('charts.draw.objectTree')} onPointerDown={(e) => e.stopPropagation()}>
       <div className="draw-tree-hd">
         <b>{tt('charts.draw.objectTree')}</b>
         <small>{drawings.length}</small>
-        <button type="button" className="draw-tree-x" onClick={onClose} aria-label={tt('common.close')}>{ico('M6 6l12 12M18 6L6 18')}</button>
+        {!docked && <button type="button" className="draw-tree-x" onClick={onClose} aria-label={tt('common.close')}>{ico('M6 6l12 12M18 6L6 18')}</button>}
       </div>
       <div className="draw-tree-list no-sb">
         {rows.length === 0 && <p className="draw-tree-empty">{tt('charts.draw.treeEmpty')}</p>}

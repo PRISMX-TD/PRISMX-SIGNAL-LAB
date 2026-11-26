@@ -33,7 +33,7 @@ export interface LegendActions {
   paneRemove: (id: string) => void
 }
 
-function fmtVal(v: number | null | undefined, def: IndDef, inst: IndInstance, digits: number): string {
+export function fmtVal(v: number | null | undefined, def: IndDef, inst: IndInstance, digits: number): string {
   if (v == null || !Number.isFinite(v)) return EMPTY
   if (inst.precision != null) return v.toFixed(inst.precision)
   if (def.digits === 'volume' || def.digits === 0) {
@@ -243,7 +243,7 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
         return (
           <div key={p.id}>
             {showRows && (
-              <div className="term-legend indl" style={{ left: 12, top: b.top + 5 }}>
+              <div className="term-legend indl" style={{ left: 'calc(12px + var(--lsw, 0px))', top: b.top + 5 }}>
                 {list.filter((i) => i.pane === p.id).map(row)}
               </div>
             )}

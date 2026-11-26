@@ -1,0 +1,204 @@
+/* K 线回放：控制条、选起点遮罩。颜色全走 tokens（浮层材质与「回到最新」按钮一致，强调色品牌紫）。
+   Bar replay: control bar and start-picking overlay. Colours come from tokens (floating material
+   matches the back-to-latest button; brand violet accent). */
+
+/* ── 控制条 / control bar ── */
+.rp-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 36px;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 4px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  transform: translateX(-50%);
+  font: 500 12px var(--font-mono);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 只剩一条提示（没在回放）：不画条子本身 / only a hint left (not replaying): no bar chrome */
+.rp-bar.bare { padding: 0; background: transparent; box-shadow: none; }
+.rp-btn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-tile, 6px);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rp-btn:disabled { opacity: 0.35; cursor: default; }
+.rp-btn.main { color: var(--text-strong); background: rgb(var(--purple-rgb) / 0.22); }
+.rp-btn.txt { min-width: 40px; color: var(--text-strong); }
+.rp-btn.exit { margin-left: 2px; color: var(--text-strong); box-shadow: inset 1px 0 0 var(--line-hi); border-radius: 0 var(--r-tile, 6px) var(--r-tile, 6px) 0; }
+.rp-btn:focus-visible, .rp-chip:focus-visible { outline: 2px solid var(--purple-hi, #8b6cff); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .rp-btn:not(:disabled):hover { color: var(--text-strong); background: rgba(127, 127, 127, 0.16); }
+  .rp-btn.main:not(:disabled):hover { background: rgb(var(--purple-rgb) / 0.36); }
+}
+.rp-btn:not(:disabled):active { transform: scale(0.94); }
+.rp-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 168px;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--text-strong);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rp-spin {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgb(var(--purple-rgb) / 0.3);
+  border-top-color: var(--purple-hi, #8b6cff);
+  border-radius: 50%;
+  animation: rp-spin 0.8s linear infinite;
+}
+@keyframes rp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rp-spin { animation-duration: 2.4s; } }
+
+.rp-speed { position: relative; }
+.rp-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  min-width: 64px;
+  padding: 4px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  transform: translateX(-50%);
+}
+.rp-menu button {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-tile, 6px);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.rp-menu button.on { color: var(--text-strong); background: rgb(var(--purple-rgb) / 0.28); }
+@media (hover: hover) and (pointer: fine) {
+  .rp-menu button:not(.on):hover { color: var(--text-strong); background: rgba(127, 127, 127, 0.16); }
+}
+
+.rp-hint {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 7px 12px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px rgb(var(--purple-rgb) / 0.5);
+  transform: translateX(-50%);
+  font: 500 12px/1.45 var(--font-sans);
+  color: var(--text-strong);
+  white-space: normal;
+  text-align: center;
+  pointer-events: none;
+}
+.rp-hint.bad { box-shadow: var(--shadow-float), inset 0 0 0 1px rgba(239, 68, 68, 0.55); }
+
+/* 窄屏：时间缩成小字、条子贴得更靠下 / narrow: smaller time, bar sits lower */
+@media (max-width: 480px) {
+  .rp-bar { bottom: 30px; gap: 0; padding: 3px; }
+  .rp-btn { min-width: 34px; height: 34px; padding: 0 4px; }
+  /* 一行放下（约 130px）；再窄就省略号，不折成四行 / one line (~130px); narrower ellipsises instead of wrapping into four lines */
+  .rp-when { max-width: 140px; padding: 0 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* ── 选起点遮罩 / start-picking overlay ── */
+.rp-sel { position: absolute; inset: 0; z-index: 24; pointer-events: none; }
+.rp-sel-dim { position: absolute; top: 0; bottom: 0; background: rgba(9, 9, 11, 0.5); }
+.rp-sel-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px solid var(--purple-hi, #8b6cff);
+}
+.rp-sel-tag {
+  position: absolute;
+  bottom: 30px;
+  left: 0;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--purple);
+  color: #fff;
+  font: 500 11px var(--font-mono);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.rp-sel-top {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  transform: translateX(-50%);
+  font: 500 12px/1.4 var(--font-sans);
+  color: var(--text-strong);
+  pointer-events: auto;
+}
+.rp-sel-msg { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.rp-sel-msg svg { color: var(--purple-hi, #8b6cff); }
+.rp-sel-msg small { color: var(--text-3); font-size: 11px; }
+.rp-sel-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text-strong);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rp-chip.primary { background: var(--purple); color: #fff; }
+.rp-chip.ghost { background: transparent; color: var(--text-2); }
+@media (hover: hover) and (pointer: fine) {
+  .rp-chip:hover { background: rgba(127, 127, 127, 0.24); }
+  .rp-chip.primary:hover { background: var(--purple-vivid, var(--purple)); }
+}
+@media (max-width: 480px) {
+  .rp-sel-top { top: 6px; gap: 6px; padding: 6px 8px; }
+  .rp-chip-txt { display: none; }
+  .rp-chip.ghost { padding: 0 6px; }
+}

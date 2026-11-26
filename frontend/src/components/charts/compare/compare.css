@@ -1,0 +1,179 @@
+/* 对比品种：图例行与弹窗。颜色走 tokens；选中态品牌紫。
+   Compare symbols: legend rows and dialog. Colours from tokens; selected states in brand violet. */
+
+/* ── 图例 / legend ── */
+.cmpl-list {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: calc(100% - 140px);
+  pointer-events: none;
+  font: 500 12px var(--font-mono);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+/* 排在状态行（与买卖按钮）下面，与主图指标图例同一套偏移 / below the status line (and trade buttons), same offsets as the indicator legend */
+.term-chart.has-status .cmpl-list:not(.pane) { top: calc(8px + var(--status-h, 16px) + 6px); }
+.term-chart.has-tbtns .cmpl-list:not(.pane) { top: calc(8px + var(--status-h, 16px) + 6px + 46px); }
+.term-chart.main-min .cmpl-list:not(.pane) { display: none; }
+/* 主图指标图例让出对比行的高度（--cmp-h 由 CompareLegend 写；没写时就是 0，与原样式一致）。
+   选择器比 terminal.css 的同名规则多一个类，与引入顺序无关。
+   The main indicator legend moves down by the compare rows (--cmp-h, written by CompareLegend; 0
+   when absent = unchanged). One more class than terminal.css's rules, so import order doesn't matter. */
+.term-chart:not(.has-status) .term-legend.main.indl { top: calc(10px + var(--cmp-h, 0px)); }
+.term-chart.has-status .term-legend.main.indl { top: calc(8px + var(--status-h, 16px) + 6px + var(--cmp-h, 0px)); }
+.term-chart.has-tbtns .term-legend.main.indl { top: calc(8px + var(--status-h, 16px) + 6px + 46px + var(--cmp-h, 0px)); }
+
+.cmpl-row {
+  display: flex;
+  align-items: center;
+  gap: 0 7px;
+  min-height: 20px;
+  padding: 0 4px;
+  margin-left: -4px;
+  border-radius: 4px;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cmpl-row:hover { background: rgba(127, 127, 127, 0.14); }
+}
+.cmpl-row.off .cmpl-sym, .cmpl-row.off .cmpl-dot { opacity: 0.45; }
+.cmpl-dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
+.cmpl-sym { font-weight: 600; color: var(--text-strong); white-space: nowrap; }
+.cmpl-mode { display: inline-grid; place-items: center; color: var(--text-3); }
+.cmpl-v { white-space: nowrap; }
+.cmpl-btns { display: none; align-items: center; gap: 2px; }
+.cmpl-row:focus-within .cmpl-btns { display: inline-flex; }
+@media (hover: hover) and (pointer: fine) {
+  .cmpl-row:hover .cmpl-btns { display: inline-flex; }
+}
+/* 触屏没有悬停：按钮常显 / touch has no hover: buttons always shown */
+@media (hover: none) {
+  .cmpl-btns { display: inline-flex; }
+}
+.cmpl-btns button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cmpl-btns button:hover { color: var(--text-strong); background: rgba(127, 127, 127, 0.18); }
+}
+.term-chart[data-ctheme="light"] .cmpl-list { color: #434651; }
+.term-chart[data-ctheme="light"] .cmpl-sym { color: #131722; }
+
+/* ── 顶栏按钮的个数角标 / count badge on the top-bar button ── */
+.cmp-count {
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgb(var(--purple-rgb) / 0.3);
+  color: var(--text-strong);
+  font: 600 10px/16px var(--font-mono);
+  font-style: normal;
+  text-align: center;
+}
+
+/* ── 弹窗 / dialog ── */
+.cmp-dlg .chart-dlg-body { display: flex; flex-direction: column; gap: 18px; }
+.cmp-add { display: flex; flex-direction: column; gap: 10px; }
+.cmp-opts { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.cmp-color { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); }
+.cmp-q { text-transform: uppercase; }
+.cmp-q::placeholder { text-transform: none; }
+.cmp-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--r-md, 10px);
+  background: var(--nest);
+  box-shadow: inset 0 0 0 1px var(--line-control);
+}
+.cmp-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(var(--r-md, 10px) - 2px);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 12px var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cmp-seg.sm button { height: 26px; padding: 0 7px; }
+.cmp-seg button.on { color: var(--text-strong); background: var(--purple); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-seg button:not(.on):hover { color: var(--text-strong); }
+}
+.cmpd-list {
+  max-height: min(260px, 36dvh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.cmpd-list li button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-tile, 6px);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cmpd-list li button b { font: 500 13px var(--font-mono); color: var(--text-strong); }
+.cmp-plus { margin-left: auto; font-size: 12px; color: var(--text-3); opacity: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .cmpd-list li button:hover { background: rgb(var(--purple-rgb) / 0.18); }
+  .cmpd-list li button:hover .cmp-plus { opacity: 1; }
+}
+@media (hover: none) { .cmp-plus { opacity: 1; } }
+.cmpd-list li.none { padding: 10px; font-size: 12px; color: var(--text-3); }
+.cmp-cur { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+.cmp-cur h4 { margin: 0 0 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.cmpd-row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.cmpd-row.off .cmp-sym { opacity: 0.45; }
+.cmp-sym { flex: 1; min-width: 0; font: 600 13px var(--font-mono); color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; }
+.cmp-ico {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-tile, 6px);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cmp-ico:hover { color: var(--text-strong); background: rgba(127, 127, 127, 0.16); }
+}
+@media (max-width: 480px) {
+  .cmp-seg:not(.sm) button span { display: none; }
+  .cmp-seg:not(.sm) button { padding: 0 12px; }
+}

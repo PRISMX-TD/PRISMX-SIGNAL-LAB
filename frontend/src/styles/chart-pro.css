@@ -554,6 +554,20 @@ svg.pt-ava { display: block; border-radius: 0; }
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .pt-chips > button.on { color: #fff; background: var(--purple); }
+/* 用户分组胶囊：选中时带「⋯」，再点一次打开重命名 / 删除；「+」新建分组 / user-group chips (⋯ when active opens rename / delete); "+" adds one */
+.pt-chips > button.pt-chip-grp { display: inline-flex; align-items: center; gap: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.pt-chips > button.pt-chip-grp svg { flex-shrink: 0; margin-right: -4px; opacity: 0.85; }
+.pt-chips > button.pt-chip-add { display: grid; place-items: center; width: 26px; padding: 0; color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px var(--line-hi); }
+.pt-wl--m .pt-chips > button.pt-chip-add { width: 32px; }
+/* 分组弹层里的名字输入 / the group-name field in the popovers */
+.pt-wl-name { display: flex; gap: 6px; padding: 4px 8px 8px; }
+.pt-wl-name input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border: 0; border-radius: 6px; outline: 0; background: var(--pt-fill); box-shadow: inset 0 0 0 1px var(--line-hi); color: var(--text-strong); font: 400 13px/1 var(--pt-font); }
+.pt-wl-name input:focus { box-shadow: inset 0 0 0 1px rgb(var(--purple-rgb) / 0.75); }
+.pt-wl-del.arm, .pt-wl-del.arm > svg { color: var(--down); }
+.pt-wl-grp.user > .pt-wl-gh { color: var(--purple-hi); }
+@media (pointer: coarse) {
+  .pt-wl-name input { height: 36px; font-size: 16px; }
+}
 @media (hover: hover) and (pointer: fine) {
   .pt-chips > button:not(.on):hover { color: var(--text-strong); background: var(--pt-fill-hi); }
 }
@@ -591,10 +605,11 @@ svg.pt-ava { display: block; border-radius: 0; }
   color: var(--text-3);
   font: 500 11.5px/1 var(--pt-font);
 }
-/* 列设置关掉的列不占格 / columns turned off in the list settings take no track */
-.pt-wl.no-tr .pt-wl-cols, .pt-wl.no-tr .pt-wr { grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 24px; }
-.pt-wl.no-px .pt-wl-cols, .pt-wl.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 46px 24px; }
-.pt-wl.no-tr.no-px .pt-wl-cols, .pt-wl.no-tr.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 24px; }
+/* 列设置关掉的列不占格：列轨由 ProWatchlist 按开着的列拼成 --wl-cols（趋势 / 报价 / 涨跌幅 / 星标列宽）
+   Columns turned off take no track: ProWatchlist builds --wl-cols from the visible columns */
+.pt-wl .pt-wl-cols, .pt-wl .pt-wr { grid-template-columns: var(--wl-cols, minmax(0, 1fr) 46px minmax(76px, auto) 24px); }
+.pt-wl.has-chg .pt-wl-cols, .pt-wl.has-chg .pt-wr { column-gap: 6px; }
+.pt-wl.has-chg .pt-wr-tr { gap: 2px; }
 .pt-wl-cols .c-tr { text-align: center; }
 .pt-wl-cols .c-px { text-align: right; }
 .pt-wl-down { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin: 0; padding: 7px 12px; background: var(--mid-bg); color: var(--mid); font-size: 12px; }
@@ -673,6 +688,11 @@ svg.pt-ava { display: block; border-radius: 0; }
 .pt-wr-px.down { color: var(--down); transition: none; }
 .pt-wl.down .pt-wr-px { color: var(--text-3); background: none; }
 .pt-wr-fav { position: relative; z-index: 1; display: grid; place-items: center; }
+/* 日内涨跌幅（对前一交易日收盘）；红绿由行内 style 给（用户的涨跌提示色）/ day change % vs the previous close; colour inline (the user's cue colours) */
+.pt-wr-chg { justify-self: end; color: var(--text-3); font: 500 12px/1 var(--pt-font); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pt-wl.down .pt-wr-chg { opacity: 0.55; }
+/* 触屏长按开行菜单：不弹系统菜单、不选中文字 / touch long-press opens the row menu: no system callout or text selection */
+.pt-wr { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .pt-wr-fav .fav-star { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
 .pt-wr-fav .fav-star.on,
 .pt-wr:hover .pt-wr-fav .fav-star,
@@ -698,11 +718,8 @@ svg.pt-ava { display: block; border-radius: 0; }
 .pt-wl--m .pt-wr-nm { overflow: hidden; color: var(--text-3); font: 400 12px/1.1 var(--pt-font); text-overflow: ellipsis; }
 .pt-wl--m .pt-wr-px { font-size: 14.5px; }
 .pt-wl--m .pt-wr-tr i { width: 6px; height: 14px; }
-/* 星标列放宽到 32（触屏下星标本身就是 32×32，见 dashboard.css）/ the star column widens to 32 (touch stars are 32×32) */
-.pt-wl--m .pt-wl-cols, .pt-wl--m .pt-wr { grid-template-columns: minmax(0, 1fr) 46px minmax(76px, auto) 32px; }
-.pt-wl--m.no-tr .pt-wl-cols, .pt-wl--m.no-tr .pt-wr { grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 32px; }
-.pt-wl--m.no-px .pt-wl-cols, .pt-wl--m.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 46px 32px; }
-.pt-wl--m.no-tr.no-px .pt-wl-cols, .pt-wl--m.no-tr.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 32px; }
+/* 星标列在手机上是 32（触屏下星标本身就是 32×32，见 dashboard.css），由 --wl-cols 给出 / the star column is 32 on phones (via --wl-cols) */
+.pt-wl--m .pt-wr-chg { font-size: 13.5px; }
 .pt-watch-list { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .pt-det {
   flex-shrink: 0;
@@ -1197,3 +1214,49 @@ svg.pt-ava { display: block; border-radius: 0; }
   .pt-cmd-ov, .pt-cmd, .pt-island, .pt-island-ic svg, .pt-drawbar, .pt-al-skel i { animation: none; }
   .pt-icon:active, .pt-btn:active, .pt-strip-btn:active, .pt-tab:active .pt-tab-ic { transform: none; }
 }
+
+/* ══ 阶段 6：右栏数据窗口 / 对象树、品种详情里的交易时段与合约规格 ══
+   Phase 6: the data window / object tree widgets and the sessions / spec blocks in the detail card */
+/* 详情卡加了两节之后可能比面板高：卡片自己滚动，行情列表至少留 40% / the card may outgrow the panel: it scrolls itself, the list keeps ≥40% */
+.pt-watch .pt-det { max-height: 60%; overflow-y: auto; scrollbar-width: thin; }
+.pt-meta { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pt-meta-hd { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.pt-meta-hd::-webkit-details-marker { display: none; }
+.pt-meta-hd::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-right: 1.5px solid var(--text-3);
+  border-bottom: 1.5px solid var(--text-3);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.pt-meta:not([open]) .pt-meta-hd::after { transform: rotate(-45deg); }
+.pt-meta-hd h3 { margin: 0; color: var(--text-2); font: 600 12px/1.2 var(--pt-font); }
+.pt-meta-st { padding: 2px 8px; border-radius: 999px; font: 600 11px/1.4 var(--pt-font); }
+.pt-meta-st.open { color: var(--up); background: var(--up-bg); }
+.pt-meta-st.closed { color: var(--text-3); background: var(--pt-fill); }
+.pt-meta-dim { margin: 8px 0 0; color: var(--text-3); font-size: 12px; }
+.pt-meta-next { margin: 8px 0 0; color: var(--text-2); font-size: 12px; }
+.pt-meta-days, .pt-meta-spec { display: grid; gap: 4px; margin: 8px 0 0; }
+.pt-meta-days > div, .pt-meta-spec > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.pt-meta-days dt, .pt-meta-spec dt { flex-shrink: 0; color: var(--text-3); font-size: 12px; }
+.pt-meta-days dd, .pt-meta-spec dd { min-width: 0; margin: 0; color: var(--text); font: 500 12px/1.35 var(--pt-font); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.pt-meta-days > div.off dd { color: var(--text-3); }
+.pt-data { overflow-y: auto; }
+.pt-tree { min-height: 0; }
+.pt-tree-host { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+/* 停靠的对象树：铺满面板，不浮、不带阴影 / the docked object tree fills the panel: no float, no shadow */
+.draw-tree.docked {
+  position: static;
+  flex: 1;
+  width: auto;
+  max-height: none;
+  min-height: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+.draw-tree.docked .draw-tree-hd { padding-left: 14px; }

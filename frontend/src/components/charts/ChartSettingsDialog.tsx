@@ -1,8 +1,8 @@
-// 图表设置（对标 TradingView 的 Chart settings）：主图 / 状态行 / 坐标与线 / 画布 / 交易 五个页签，
+// 图表设置（对标 TradingView 的 Chart settings）：主图 / 状态行 / 坐标与线 / 画布 / 交易 / 事件 六个页签，
 // 底部是模板（存当前外观、套用、删除）与「恢复默认」。改动即时生效、云端同步（chartv2）。
 // 取代 2026-11-25 之前齿轮上的小菜单（倒计时 + K 线颜色 + 显示持仓），那几项都在这里。
 // Chart settings (benchmarked on TradingView's): Symbol / Status line / Scales & lines /
-// Canvas / Trading tabs, with templates (save the current look, apply, delete) and "reset"
+// Canvas / Trading / Events tabs, with templates (save the current look, apply, delete) and "reset"
 // in the footer. Applies instantly and syncs to the cloud (chartv2). Replaces the small gear
 // menu used before 2026-11-25 (countdown, candle colours, show positions) — those live here.
 import { useState, type ReactNode } from 'react'
@@ -15,8 +15,8 @@ import { COLOR_PRESETS } from './indicatorSettings'
 import { PRICE_BASED_TYPES, templateOf, type ChartPrefs, type GridMode, type ScaleMode } from './chartPrefs'
 import type { ChartPrefsUpdate } from './useChartPrefs'
 
-type Tab = 'symbol' | 'status' | 'scales' | 'canvas' | 'trading'
-const TABS: Tab[] = ['symbol', 'status', 'scales', 'canvas', 'trading']
+type Tab = 'symbol' | 'status' | 'scales' | 'canvas' | 'trading' | 'events'
+const TABS: Tab[] = ['symbol', 'status', 'scales', 'canvas', 'trading', 'events']
 
 interface Props {
   prefs: ChartPrefs
@@ -261,6 +261,22 @@ export default function ChartSettingsDialog(p: Props) {
           </>
         )
       }
+      case 'events': {
+        // 图上事件：财经日历标记（只标与当前品种货币相关的数据）/ chart events: econ-calendar markers for the symbol's currencies
+        const ev = prefs.events
+        return (
+          <>
+            <Row label={tt('charts.events.econ')} hint={tt('charts.events.econHint')}>
+              <Switch checked={ev.econ} onChange={(v) => set('events', { ...ev, econ: v })} aria-label={tt('charts.events.econ')} />
+            </Row>
+            <Row label={tt('charts.events.minImp')}>
+              <Seg<2 | 3> value={ev.minImp} label={tt('charts.events.minImp')} options={[
+                { v: 2, label: tt('charts.events.imp2') }, { v: 3, label: tt('charts.events.imp3') },
+              ]} onChange={(v) => set('events', { ...ev, minImp: v })} />
+            </Row>
+          </>
+        )
+      }
     }
   })()
 
@@ -278,13 +294,13 @@ export default function ChartSettingsDialog(p: Props) {
       <div className="chart-cs-tabs" role="tablist" aria-label={tt('charts.settings.title')}>
         {TABS.map((k) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-            {tt(`charts.cs.tab.${k}`)}
+            {k === 'events' ? tt('charts.events.tab') : tt(`charts.cs.tab.${k}`)}
           </button>
         ))}
       </div>
       <div className="chart-cs-body" role="tabpanel">
         {body}
-        {tab !== 'trading' && (
+        {tab !== 'trading' && tab !== 'events' && (
           <div className="chart-set-sec chart-tpl">
             <b>{tt('charts.cs.templates')}</b>
             <form className="chart-iv-in" onSubmit={(e) => { e.preventDefault(); saveTemplate() }}>

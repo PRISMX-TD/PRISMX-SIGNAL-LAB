@@ -5,6 +5,7 @@
 // in draw/tools.ts and one series primitive paints every drawing (draw/primitive.ts); this component
 // owns the interaction state machine, selection, undo, persistence and the floating bar / settings /
 // object tree UI.
+import { createPortal } from 'react-dom'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, Logical, MouseEventParams } from 'lightweight-charts'
@@ -117,6 +118,12 @@ interface Props {
   spec?: SymbolSpec
   // 给选中的画线添加警报（阶段 5）/ add an alert on the selected drawing (phase 5)
   onAlert?: (d: Drawing) => void
+  // 多图布局里只有当前格响应画线快捷键（撤销 / 删除 / Alt+字母 / 方向键）；默认 true
+  // In a multi-chart layout only the active cell answers drawing hotkeys (undo / delete / Alt+letter / arrows); default true
+  keys?: boolean
+  // 专业版右栏「对象树」面板：给了就把对象树常驻渲染进这个元素（portal），不再浮在图上
+  // The pro right panel's object-tree widget: when given, the tree renders docked into this element (portal) instead of floating
+  treeHost?: HTMLElement | null
 }
 
 type Gesture =
@@ -128,11 +135,13 @@ type Gesture =
 
 interface Creating { d: Drawing; step: number }
 
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder, onAlert, spec }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder, onAlert, spec, keys = true, treeHost = null }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
   useEffect(() => { registerBarTimes(chart, barTimes) }, [chart, barTimes])
+  const keysRef = useRef(keys)
+  keysRef.current = keys
 
   // ──── 状态 / state ────
   const [tool, setToolState] = useState<Tool>('cursor')
@@ -1133,6 +1142,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       return !!scope && !!active && scope.contains(active)
     }
     const onKey = (e: KeyboardEvent) => {
+      if (!keysRef.current) return
       const mod = e.ctrlKey || e.metaKey
       if (e.key === 'Escape') {
         if (createRef.current || gestureRef.current) cancelCreate()
@@ -1158,7 +1168,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     // 方向键微调选中的画线：捕获期抢在图表快捷键（方向键平移 / 缩放）前面，并截住
     // Arrow keys nudge the selection: capture phase, ahead of the chart's arrow pan / zoom, and stopped there
     const onArrow = (e: KeyboardEvent) => {
-      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+      if (!keysRef.current || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
       if (!selRef.current.length || inTextField(e.target) || !inChartArea() || e.ctrlKey || e.metaKey || e.altKey) return
       const ids = new Set(selRef.current)
       const list = drawingsRef.current
@@ -1425,7 +1435,21 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
         />
       )}
 
-      {treeOpen && (
+      {treeHost ? createPortal(
+        <DrawObjectTree
+          docked
+          drawings={drawings}
+          selected={sel}
+          onSelect={(id, add) => select(add ? (sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]) : [id])}
+          onPatch={(id, patch) => commit(drawingsRef.current.map((d) => (d.id === id ? { ...d, ...patch } : d)))}
+          onDelete={(id) => commit(drawingsRef.current.filter((d) => d.id !== id))}
+          onReorder={(id, how) => reorder(how, id)}
+          onSettings={(id) => { select([id]); setSettings({ id, tab: 'style' }) }}
+          onClose={() => setTreeOpen(false)}
+          t={t}
+        />,
+        treeHost,
+      ) : treeOpen && (
         <DrawObjectTree
           drawings={drawings}
           selected={sel}

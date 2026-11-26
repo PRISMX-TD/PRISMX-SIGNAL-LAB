@@ -11,7 +11,7 @@ import type { ChartPrefs, ChartType } from './chartPrefs'
 import { intervalLabel } from './intervals'
 import { useOhlc, type OhlcStore } from './ohlcStore'
 
-function fmtVol(v: number): string {
+export function fmtVol(v: number): string {
   if (!Number.isFinite(v) || v <= 0) return '—'
   if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`
   if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`

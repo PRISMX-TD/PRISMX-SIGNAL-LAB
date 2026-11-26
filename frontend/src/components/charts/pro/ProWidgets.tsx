@@ -1,9 +1,11 @@
-// 专业版终端右侧：最右一条图标栏 + 它左边可拖宽的面板。面板三种：
-//   自选（行情列表 + 当前品种详情卡）· 交易（下单票 + 账户）· 警报（列表，开关直接停 / 启）。
+// 专业版终端右侧：最右一条图标栏 + 它左边可拖宽的面板。面板五种：
+//   自选（行情列表 + 当前品种详情卡）· 交易（下单票 + 账户）· 警报（列表，开关直接停 / 启）·
+//   数据窗口（十字线那根的 OHLC / 对比 / 指标值，阶段 6）· 对象树（当前图的全部画线，阶段 6）。
 // 再点一次当前图标收起面板，图表变宽；宽度松手才存（拖动中只改本地样式）。
 // The pro terminal's right side: an icon strip on the far edge and a resizable panel beside
-// it. Three panels: watchlist (list + the active symbol's detail card) · trade (ticket +
-// account) · alerts (list with inline stop / resume switches). Clicking the active icon again
+// it. Five panels: watchlist (list + the active symbol's detail card) · trade (ticket +
+// account) · alerts (list with inline stop / resume switches) · data window (OHLC / compare /
+// indicator values at the crosshair bar, phase 6) · object tree (the active chart's drawings, phase 6). Clicking the active icon again
 // collapses the panel and widens the chart; the width is saved on release only.
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,7 +18,9 @@ import Switch from '../../Switch'
 import { splitPrice, type DayStats } from '../SymbolHeader'
 import { setAlertActive, useChartAlerts } from '../alert/alertStore'
 import { PANEL_MAX, PANEL_MIN, type ProWidget } from './proPrefs'
-import { IcBell, IcClose, IcDock, IcKeyboard, IcList, IcPlus, IcTrade } from './icons'
+import { IcBell, IcClose, IcData, IcDock, IcKeyboard, IcList, IcPlus, IcTrade, IcTree } from './icons'
+import { tzOffsetSec } from '../chartTime'
+import { convertSessions, fmtMin, useChartSpec, useSymbolSessions } from './symbolMeta'
 
 interface Props {
   widget: ProWidget | null
@@ -27,6 +31,9 @@ interface Props {
   details: ReactNode
   trade: ReactNode
   alerts: ReactNode
+  // 数据窗口 / 对象树（当前格）/ data window / object tree (the active cell)
+  data: ReactNode
+  tree: ReactNode
   alertCount: number
   onKeys: () => void
   dockOpen: boolean
@@ -38,9 +45,11 @@ const ORDER: { id: ProWidget; icon: ReactNode }[] = [
   { id: 'watch', icon: <IcList size={19} /> },
   { id: 'trade', icon: <IcTrade size={19} /> },
   { id: 'alerts', icon: <IcBell size={19} /> },
+  { id: 'data', icon: <IcData size={19} /> },
+  { id: 'tree', icon: <IcTree size={19} /> },
 ]
 
-export default function ProWidgets({ widget, onWidget, width, onWidth, watch, details, trade, alerts, alertCount, onKeys, dockOpen, onDock, posBadge }: Props) {
+export default function ProWidgets({ widget, onWidget, width, onWidth, watch, details, trade, alerts, data, tree, alertCount, onKeys, dockOpen, onDock, posBadge }: Props) {
   const { t } = useTranslation()
   const tt = (k: string) => String(t(k))
   const panelRef = useRef<HTMLElement>(null)
@@ -105,6 +114,8 @@ export default function ProWidgets({ widget, onWidget, width, onWidth, watch, de
           )}
           {widget === 'trade' && <div className="pt-panel-body pt-trade no-sb">{trade}</div>}
           {widget === 'alerts' && <div className="pt-panel-body pt-alerts">{alerts}</div>}
+          {widget === 'data' && <div className="pt-panel-body pt-data no-sb">{data}</div>}
+          {widget === 'tree' && <div className="pt-panel-body pt-tree">{tree}</div>}
         </aside>
       )}
       <nav className="pt-strip" aria-label={tt('charts.pro.panels')}>
@@ -139,7 +150,7 @@ export default function ProWidgets({ widget, onWidget, width, onWidth, watch, de
 // 大价格（大手 · 点位 · 末位）+ 涨跌幅、卖 / 买 / 点差三格、日内区间条（现价在区间里的位置）。
 // Big price (big figure · pips · last digit) + change, a sell / buy / spread trio, and the day
 // range bar with the live price's place in it.
-export function ProDetails({ symbol, digits, dayStats, fallback, stale, down }: { symbol: string; digits: number; dayStats: DayStats | null; fallback: number; stale: boolean; down: boolean }) {
+export function ProDetails({ symbol, digits, dayStats, fallback, stale, down, timezone = 'local' }: { symbol: string; digits: number; dayStats: DayStats | null; fallback: number; stale: boolean; down: boolean; timezone?: string }) {
   const { t } = useTranslation()
   const tt = (k: string) => String(t(k))
   const q = useGlobalQuote(symbol)
@@ -182,7 +193,90 @@ export function ProDetails({ symbol, digits, dayStats, fallback, stale, down }: 
         </div>
         <div className="pt-range-ends"><span>{f(lo)}</span><span>{f(hi)}</span></div>
       </div>
+      <ProSymbolMeta symbol={symbol} timezone={timezone} />
     </section>
+  )
+}
+
+// ── 交易时段 + 合约规格（阶段 6）/ trading sessions + contract spec (phase 6) ──
+// 时段按图表时区显示（服务器日的分钟数 + 服务器 UTC 偏移换过来）；拿不到（known=false）就一条横线。
+// 规格只列有值的字段。两者每个品种只拉一次（symbolMeta.ts 缓存）。
+// Sessions show in the chart timezone (server-day minutes shifted by the server's UTC offset); unknown
+// (known=false) is a dash line. The spec lists only non-null fields. Both are fetched once per symbol.
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+const num = (v: number | null | undefined) => (v == null ? null : String(+v.toPrecision(10)))
+function ProSymbolMeta({ symbol, timezone }: { symbol: string; timezone: string }) {
+  const { t, i18n } = useTranslation()
+  const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
+  const { data: sess } = useSymbolSessions(symbol || null)
+  const { data: spec } = useChartSpec(symbol || null)
+  const offMin = Math.round(tzOffsetSec(timezone, Date.now() / 1000) / 60)
+  const segs = useMemo(
+    () => (sess?.known && sess.serverUtcOffsetSec != null ? convertSessions(sess.sessions, sess.serverUtcOffsetSec, offMin) : null),
+    [sess, offMin],
+  )
+  const dayName = useMemo(() => {
+    const f = new Intl.DateTimeFormat(i18n.language || 'zh', { weekday: 'short', timeZone: 'UTC' })
+    // 1970-01-04 是周日 / 1970-01-04 was a Sunday
+    return (d: number) => f.format(new Date(Date.UTC(1970, 0, 4 + d)))
+  }, [i18n.language])
+  const nextOpen = sess?.nextOpenAt ? Date.parse(sess.nextOpenAt) / 1000 : NaN
+  const fmtAt = (ts: number) => {
+    const w = new Date((ts + tzOffsetSec(timezone, ts)) * 1000)
+    return `${dayName(w.getUTCDay())} ${fmtMin(w.getUTCHours() * 60 + w.getUTCMinutes())}`
+  }
+  const specRows: [string, string][] = []
+  if (spec) {
+    const push = (k: string, v: string | null) => { if (v != null && v !== '') specRows.push([k, v]) }
+    push('contractSize', num(spec.contractSize))
+    push('tickSize', num(spec.tickSize))
+    push('tickValue', num(spec.tickValue))
+    push('digits', num(spec.digits))
+    if (spec.volumeMin != null || spec.volumeMax != null) push('volume', `${num(spec.volumeMin) ?? EMPTY} – ${num(spec.volumeMax) ?? EMPTY}`)
+    push('volumeStep', num(spec.volumeStep))
+    push('currencyBase', spec.currencyBase)
+    push('currencyProfit', spec.currencyProfit)
+    push('currencyMargin', spec.currencyMargin)
+    push('description', spec.description)
+  }
+  if (!symbol) return null
+  return (
+    <>
+      <details className="pt-meta" open>
+        <summary className="pt-meta-hd">
+          <h3>{tt('charts.pro.meta.sessions')}</h3>
+          {sess?.known && sess.openNow != null && (
+            <span className={`pt-meta-st ${sess.openNow ? 'open' : 'closed'}`}>{tt(sess.openNow ? 'charts.pro.meta.open' : sess.holiday ? 'charts.pro.meta.holiday' : 'charts.pro.meta.closed')}</span>
+          )}
+        </summary>
+        {!segs ? <p className="pt-meta-dim">{EMPTY}</p> : (
+          <>
+            {sess && sess.openNow === false && Number.isFinite(nextOpen) && (
+              <p className="pt-meta-next">{tt('charts.pro.meta.nextOpen', { at: fmtAt(nextOpen) })}</p>
+            )}
+            <dl className="pt-meta-days">
+              {WEEK_ORDER.map((d) => {
+                const ds = segs.filter((x) => x.day === d)
+                return (
+                  <div key={d} className={ds.length ? undefined : 'off'}>
+                    <dt>{dayName(d)}</dt>
+                    <dd>{ds.length ? ds.map((x) => `${fmtMin(x.from)}–${x.to >= 1440 ? '24:00' : fmtMin(x.to)}`).join(', ') : tt('charts.pro.meta.closedDay')}</dd>
+                  </div>
+                )
+              })}
+            </dl>
+          </>
+        )}
+      </details>
+      <details className="pt-meta" open>
+        <summary className="pt-meta-hd"><h3>{tt('charts.pro.meta.spec')}</h3></summary>
+        {specRows.length === 0 ? <p className="pt-meta-dim">{EMPTY}</p> : (
+          <dl className="pt-meta-spec">
+            {specRows.map(([k, v]) => <div key={k}><dt>{tt(`charts.pro.meta.${k}`)}</dt><dd>{v}</dd></div>)}
+          </dl>
+        )}
+      </details>
+    </>
   )
 }
 

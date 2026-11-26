@@ -83,6 +83,9 @@ export interface ChartPrefs {
   // 图表交易（阶段 3）：线上显示什么、按钮放哪、要不要一键下单。不进模板（模板只管外观）。
   // Chart trading (phase 3): what the lines show, where buttons go, one-click. Not part of templates.
   trading: TradingPrefs
+  // 图上事件（阶段 6）：财经日历标记开关、最低重要度（2 = 中 + 高，3 = 只看高）。不进模板。
+  // Chart events (phase 6): econ-calendar markers on / off and minimum importance (2 = medium + high, 3 = high only). Not in templates.
+  events: { econ: boolean; minImp: 2 | 3 }
 }
 
 export type PnlUnit = 'money' | 'points' | 'pct'
@@ -126,6 +129,7 @@ export const DEFAULT_CHART_PREFS: ChartPrefs = {
   transform: { renkoBox: 0, renkoWicks: false, lineBreak: 3, kagiReversal: 0, pnfBox: 0, pnfReversal: 3, pnfSource: 'close' },
   templates: [],
   trading: { pnl: true, pnlUnit: 'money', lineButtons: true, pending: true, executions: true, buttons: true, oneClick: false, align: 'right', sound: false },
+  events: { econ: true, minImp: 2 },
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/
@@ -156,6 +160,7 @@ export function normalizeChartPrefs(raw: unknown, isInterval: (c: string) => boo
   const cv = obj(r.canvas)
   const tf = obj(r.transform)
   const tr = obj(r.trading)
+  const ev = obj(r.events)
   const dt = d.trading
   const favs = Array.isArray(r.favIntervals) ? r.favIntervals.filter((x): x is string => typeof x === 'string' && isInterval(x)).slice(0, 24) : d.favIntervals
   const tz = typeof r.timezone === 'string' && isValidTimezone(r.timezone) ? r.timezone : d.timezone
@@ -220,6 +225,10 @@ export function normalizeChartPrefs(raw: unknown, isInterval: (c: string) => boo
       oneClick: bool(tr.oneClick, dt.oneClick),
       align: pick(tr.align, ['left', 'right'] as const, dt.align),
       sound: bool(tr.sound, dt.sound),
+    },
+    events: {
+      econ: bool(ev.econ, d.events.econ),
+      minImp: ev.minImp === 3 ? 3 : 2,
     },
   }
 }

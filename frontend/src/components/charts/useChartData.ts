@@ -3,7 +3,7 @@
 // Chart data: history snapshot on symbol/interval change, backward paging, the
 // latest-price poll, day stats and the stale flag. Moved out of ChartsPage
 // verbatim on 2026-09-06; every ref comes from useChartEngine.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { chartApi } from '../../api/client'
 import type { Candle } from '../../api/types'
 import type { DayStats } from './SymbolHeader'
@@ -20,6 +20,25 @@ import { olderBarsChanged, tailHasHole } from './tailRepair'
 import { netQuality } from '../../store/netQuality'
 import { isAppHidden } from '../../utils/appVisibility'
 import { startPolling } from '../../utils/usePollWhileVisible'
+import { ReplayController, type ReplayState } from './replay/replayController'
+
+// 阶段 6：K 线回放的对外接口（useChartData 返回 replay）。状态字段见 ReplayState；
+// 方法都是稳定引用，可以直接当事件处理函数。
+// Phase 6: the bar-replay API returned by useChartData. State fields are ReplayState's; the
+// methods are stable references, safe to pass straight as handlers.
+export interface ReplayApi extends ReplayState {
+  beginSelect: () => void
+  cancelSelect: () => void
+  start: (t: number) => Promise<void>
+  startRandom: () => Promise<void>
+  step: () => void
+  play: () => void
+  pause: () => void
+  toggle: () => void
+  setSpeed: (x: number) => void
+  exit: () => void
+  dismissHint: () => void
+}
 
 // digits：价格轴小数位，由 ChartsPage 按「券商报价 digits 优先、兜底表其次」解析好
 // 后传入（以前这里自己查那张 7 条的写死表，表外品种的价格轴 minMove 被压成 0.01，
@@ -63,6 +82,30 @@ export function useChartData(symbol: string, interval: string, digits: number, e
   // 往左补一页历史（跳转到日期 / 范围快捷键用），由下面的大 effect 挂上。
   // Load one older page (go-to-date / range shortcuts); installed by the effect below.
   const loadOlderOnceRef = useRef<(() => Promise<boolean>) | null>(null)
+
+  // 阶段 6：K 线回放。控制器每张图一个；回放期间下面的轮询、尾部重拉、最新价合并都暂停，
+  // 往左翻页改写回放数据（见 replay/replayController.ts）。
+  // Phase 6: bar replay. One controller per chart; while it is active the polling, tail refill
+  // and latest merge below pause, and paging left writes into the replay data.
+  const [replayCtl] = useState(() => new ReplayController())
+  replayCtl.setEngine(engine)
+  const replayState = useSyncExternalStore(replayCtl.subscribe, replayCtl.getState)
+  const [replayActions] = useState(() => ({
+    beginSelect: () => replayCtl.beginSelect(),
+    cancelSelect: () => replayCtl.cancelSelect(),
+    start: (t: number) => replayCtl.start(t),
+    startRandom: () => replayCtl.startRandom(),
+    step: () => { replayCtl.step() },
+    play: () => replayCtl.play(),
+    pause: () => replayCtl.pause(),
+    toggle: () => replayCtl.toggle(),
+    setSpeed: (x: number) => replayCtl.setSpeed(x),
+    exit: () => replayCtl.exit(),
+    dismissHint: () => replayCtl.dismissHint(),
+  }))
+  const replay = useMemo<ReplayApi>(() => ({ ...replayState, ...replayActions }), [replayState, replayActions])
+  // 卸载时停掉计时器 / stop timers on unmount
+  useEffect(() => () => { replayCtl.detach() }, [replayCtl])
 
   // 数据状态：加载中 / 有数据 / 空（该品种周期暂无数据）/延迟
   // data status: loading / has data / empty (no data for this symbol+interval) / stale
@@ -128,6 +171,20 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     loadingOlderRef.current = false
     hasMoreHistoryRef.current = true
     isFollowingLiveRef.current = true
+    // 回放绑到这次的品种 / 周期（换了就放弃旧的回放）。退出回放时放回实时数据后立即补拉最新价。
+    // Bind replay to this symbol / interval (a different one abandons the old replay). On exit,
+    // after the live data is back, fetch latest at once.
+    replayCtl.attach({
+      symbol, interval, dataKeyRef,
+      onCursor: (b) => setLastPrice(b.c),
+      onLiveRestored: () => {
+        if (!alive) return
+        const arr = candlesRef.current
+        if (arr.length > 0) setLastPrice(arr[arr.length - 1].c)
+        setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
+        void feed.latest(10).then(handleLatest).catch(() => {})
+      },
+    })
 
     // 把一根 bar 应用到图表：只在其时间 >= 已应用的最新时间时更新，避免
     // lightweight-charts 对更早时间抛错而中断实时刷新。
@@ -215,6 +272,15 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     feed.history(HISTORY_FIRST_PAGE).then((r) => {
       if (!alive) return
       historyApplied = true
+      // 回放已经开始（快照秒开后就点了回放）：历史只更新存着的实时数据，图上不动。
+      // A replay already started (picked right after the snapshot paint): only update the stash.
+      if (replayCtl.isActive()) {
+        if (r.bars.length > 0) {
+          serverLastT = r.bars[r.bars.length - 1].t
+          replayCtl.replaceLive(r.bars.slice(-MAX_CLIENT_BARS), r.hasMore, snapKey)
+        }
+        return
+      }
       if (r.bars.length > 0) {
         candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
         renderAll()
@@ -277,7 +343,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         // full, yet the viewport was still shifted by r.bars.length, so the chart
         // jumped 500 bars right ("it snapped back") and re-requested the same page
         // on every further drag. Shift by what was actually inserted.
-        const merged = [...r.bars, ...candlesRef.current].slice(0, MAX_CLIENT_BARS)
+        // 回放中：更早的 bar 并进回放数据，图上换成新的前 idx+1 根。
+        // During a replay the older bars go into the replay data; the chart gets the new first idx+1.
+        const merged = (replayCtl.isActive() ? replayCtl.prependOlderVisible(r.bars) : null)
+          ?? [...r.bars, ...candlesRef.current].slice(0, MAX_CLIENT_BARS)
         const inserted = merged.length - candlesRef.current.length
         // 视窗按「图上多出来的根数」平移：变换后的图表（砖形等）与原始 K 线不一一对应。
         // Shift the viewport by the displayed bars added: transformed types aren't 1:1 with candles.
@@ -349,7 +418,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       refilling = true
       lastRefillAt = Date.now()
       feed.history(HISTORY_FIRST_PAGE).then((r) => {
-        if (!alive || r.bars.length === 0) return
+        if (!alive || r.bars.length === 0 || replayCtl.isActive()) return
         const firstT = r.bars[0].t
         // 比这页更早的本地 bar 保留（用户可能往左翻过很多页）；这页之后的本地 bar 丢掉，
         // 由下面的 latest 补回。/ Keep local bars older than this page (the user may have paged
@@ -374,6 +443,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
 
     const handleLatest = (r: Awaited<ReturnType<typeof chartApi.latest>>) => {
         if (!alive) return
+        // 回放中不合并最新价（退出时 onLiveRestored 会再拉一次）/ no merging during a replay (exit fetches again)
+        if (replayCtl.isActive()) return
         // 历史还没回来：先记下，历史 setData 之后再接上（否则会被整段覆盖掉）。
         // History not back yet: stash it and join after history's setData (which would wipe it).
         pendingLatest = r
@@ -422,7 +493,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
     }
-    const poll = (): Promise<void> => feed.latest().then(handleLatest).catch(() => {})
+    // 回放中不轮询（省流量，也不会有实时 bar 混进来）/ no polling during a replay (saves egress, no live bars leak in)
+    const poll = (): Promise<void> => (replayCtl.isActive() ? Promise.resolve() : feed.latest().then(handleLatest).catch(() => {}))
     // 首拍多要 10 根：库里已收盘 bar 落后一两根时，用缓存尾部把缺口补齐。
     // First call asks for 10 bars so a DB lagging a bar or two behind has its gap filled.
     void feed.latest(10).then(handleLatest).catch(() => {})
@@ -473,7 +545,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       boundaryTimer = window.setTimeout(() => {
         const attempt = (left: number) => {
           if (!alive) return
-          if (isAppHidden() || !wsLive()) { scheduleBoundary(); return }
+          if (isAppHidden() || !wsLive() || replayCtl.isActive()) { scheduleBoundary(); return }
           void poll().then(() => {
             if (!alive) return
             if (lastTimeRef.current < expectT && left > 0) {
@@ -491,7 +563,9 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     return () => {
       alive = false
       loadOlderOnceRef.current = null
-      if (historyApplied || snap) saveSnapshot(snapKey, candlesRef.current)
+      // 回放中收尾：快照存实时数据而不是回放数据 / ending mid-replay: snapshot the live data, not the replay
+      const liveBars = replayCtl.detach()
+      if (historyApplied || snap) saveSnapshot(snapKey, liveBars ?? candlesRef.current)
       stopPolling()
       if (boundaryTimer !== undefined) window.clearTimeout(boundaryTimer)
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
@@ -507,7 +581,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // swap the call order (or delay chart creation until the container mounts)
     // and this silently returns, leaving a permanently blank page with no error
     // path. Re-running when drawReady flips is the explicit readiness signal.
-  }, [symbol, interval, drawReady, recomputeIndicators, renderAll, renderTail])
+  }, [symbol, interval, drawReady, recomputeIndicators, renderAll, renderTail, replayCtl])
 
   // 往左补历史直到 fromT（最多 maxPages 页），返回补完后最早一根的时间。
   // 只在用户主动跳转日期 / 选时间范围时调用，平时不预取，省流量。
@@ -531,5 +605,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     return candlesRef.current[0]?.t ?? null
   }, [candlesRef, hasMoreHistoryRef, loadingOlderRef])
 
-  return { hasData, stale, lastPrice, dayStats, ensureHistory }
+  // replayActive：页面据此停掉 LiveBarSync、藏起持仓 / 挂单层、加单按钮、买卖按钮与收线倒计时。
+  // replayActive: the page suspends LiveBarSync and hides positions / orders, the plus-order button,
+  // the trade buttons and the bar countdown while it is true.
+  return { hasData, stale, lastPrice, dayStats, ensureHistory, replay, replayActive: replayState.active }
 }

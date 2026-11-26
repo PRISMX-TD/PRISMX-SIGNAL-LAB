@@ -9,7 +9,7 @@
 // chart viewer's (chartApi / derived intervals), hitting /chart/history's shared cache keys.
 // Entries unused for ten minutes are dropped when the cache is full.
 import type { Candle } from '../../../api/types'
-import { createChartFeed, type ChartFeed } from '../derivedIntervals'
+import { createChartFeed, derivedSpec, type ChartFeed } from '../derivedIntervals'
 
 const REFRESH_MS = 30_000
 const RETRY_MS = 60_000
@@ -70,6 +70,30 @@ export function otherBars(symbol: string, interval: string): Candle[] | null {
   const wait = e.failed ? RETRY_MS : e.bars ? REFRESH_MS : 0
   if (!e.loading && now - e.lastFetch >= wait) load(e, now)
   return e.bars
+}
+
+// 别处（对比品种）已经取到的同周期 K 线顺手放进来，相关系数 / 价差指标就不用再拉一遍。
+// 只在本缓存还没有数据、或新数据更长时才收；不改 lastFetch，之后照常按 30 秒补最新。
+// Bars another feature (compare symbols) already fetched for the same interval are dropped in, so
+// correlation / spread indicators don't fetch them again. Taken only when this cache is empty or
+// the new data is longer; lastFetch is untouched, so the 30 s latest refresh carries on as usual.
+export function seedOtherBars(symbol: string, interval: string, bars: readonly Candle[]) {
+  // 只收原生周期：派生周期的 feed 没走过首页，尾巴是空的，之后补最新会把形成中那根合成错
+  // Native intervals only: a derived feed that never loaded its first page has an empty tail, and
+  // the later latest refresh would mis-aggregate the forming bar
+  if (!symbol || !interval || bars.length === 0 || derivedSpec(interval)) return
+  const k = `${symbol}|${interval}`
+  const now = Date.now()
+  let e = cache.get(k)
+  if (!e) {
+    evict(now)
+    e = { feed: createChartFeed(symbol, interval), bars: null, loading: false, lastFetch: now, lastUse: now, failed: false }
+    cache.set(k, e)
+  }
+  if (e.bars && e.bars.length >= bars.length) return
+  e.bars = bars.slice(-PAGE * 2)
+  e.failed = false
+  notify()
 }
 
 // 数据到了就回调（引擎用它触发重算）/ called when data arrives (the engine recomputes)

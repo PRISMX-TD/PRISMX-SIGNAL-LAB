@@ -12,6 +12,7 @@ import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
 import { emitChartDrawingsUpdate } from '../utils/chartDrawingsEvents'
+import { emitChartLayoutsUpdate } from '../components/charts/layout/layoutEvents'
 import { emitChartAlertFired, emitChartAlertsUpdate } from '../utils/chartAlertEvents'
 import { isAppHidden, onForeground, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
@@ -862,6 +863,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           symbol: d.symbol,
           updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : null,
         })
+        break
+      }
+      case 'CHART_LAYOUTS_UPDATE': {
+        // 图表布局被写了（本机或别的设备）：转成 window 事件，布局 hook 自己重拉。见 components/charts/layout/layoutEvents。
+        // A chart layout was written (here or elsewhere): re-dispatch as a window event; the layout hook refetches.
+        const d = msg.data as { id?: unknown } | undefined
+        emitChartLayoutsUpdate({ id: d && typeof d.id === 'string' ? d.id : null })
         break
       }
       case 'CHART_ALERTS_UPDATE':

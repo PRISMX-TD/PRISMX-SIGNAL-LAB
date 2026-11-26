@@ -1658,7 +1658,7 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'CHART_DRAWINGS_UPDATE' | 'CHART_ALERTS_UPDATE' | 'CHART_ALERT_FIRED' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'CHART_DRAWINGS_UPDATE' | 'CHART_LAYOUTS_UPDATE' | 'CHART_ALERTS_UPDATE' | 'CHART_ALERT_FIRED' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]
@@ -1675,6 +1675,70 @@ export interface ChartDrawingsOut {
   symbol: string
   drawings: unknown[]
   updatedAt: string | null
+}
+
+// 图表布局（后端 rev 57，表 chart_layouts）。data 是前端自定的布局 JSON（≤64KB），接口层不透明。
+// Chart layouts (backend rev 57, table chart_layouts). data is a frontend-owned layout JSON (≤64KB), opaque here.
+export interface ChartLayout {
+  id: string
+  name: string
+  data: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+// K 线批量 / 按时间范围（阶段 6）/ batch and time-range candles (phase 6)
+export interface ChartRangeOut {
+  symbol: string
+  interval: string
+  bars: Candle[]
+  // 范围内还有更多没返回（被 limit 截断）/ more bars exist in the range than limit allowed
+  truncated: boolean
+  // 数据库里该品种该周期最早一根的时间（回放可选范围用），没有数据为 null
+  // earliest stored bar time for this symbol/interval (replay range), null when none
+  earliest: number | null
+}
+
+export interface ChartBatchOut {
+  interval: string
+  series: Record<string, { bars: Candle[]; hasMore: boolean }>
+}
+
+// 交易时段（网关透传）。day: 0=周日…6=周六；open/close 是服务器时间当天分钟数（0–1440）。
+// Trading sessions (gateway passthrough). day 0=Sun…6=Sat; open/close are minutes of the server-time day.
+export interface ChartSessions {
+  symbol: string
+  known: boolean
+  openNow: boolean | null
+  holiday: boolean
+  nextOpenAt: string | null
+  serverUtcOffsetSec: number | null
+  sessions: { day: number; open: number; close: number }[]
+  source: string
+}
+
+// 品种规格。拿不到的字段为 null / symbol spec; unknown fields are null
+export interface ChartSymbolSpec {
+  symbol: string
+  digits: number | null
+  contractSize: number | null
+  tickSize: number | null
+  tickValue: number | null
+  volumeMin: number | null
+  volumeMax: number | null
+  volumeStep: number | null
+  currencyBase: string | null
+  currencyProfit: string | null
+  currencyMargin: string | null
+  description: string | null
+  source: string
+}
+
+// 日内涨跌基准：当前券商日线的开盘价和前一根日线收盘价 / day-change reference from broker daily bars
+export interface ChartDayRef {
+  open: number
+  prevClose: number | null
+  t: number
 }
 
 export interface ChartDrawingsSaved {

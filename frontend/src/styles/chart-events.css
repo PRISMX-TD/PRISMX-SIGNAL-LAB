@@ -1,0 +1,48 @@
+/* 图上财经事件的提示卡（.cev-*）。只由 components/charts/events/EconEventsLayer.tsx import。
+   卡片 portal 到 body、fixed 定位，不吃指针事件（不挡图表拖动）；颜色全取 tokens.css。
+   The chart econ-event card (.cev-*), imported only by EconEventsLayer.tsx. Portalled to body with
+   fixed positioning and no pointer events (never blocks chart drags); colours from tokens.css. */
+.cev-card {
+  position: fixed;
+  z-index: 60;
+  max-width: calc(100vw - 16px);
+  max-height: min(60vh, 440px);
+  overflow: hidden;
+  padding: 4px 0;
+  border: 1px solid var(--line-hi);
+  border-radius: 10px;
+  background: var(--surface-float);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  color: var(--text);
+  font: 400 12px/1.4 var(--pt-font, var(--font-sans, system-ui));
+  pointer-events: none;
+}
+.cev-tail {
+  position: absolute;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  border-right: 1px solid var(--line-hi);
+  border-bottom: 1px solid var(--line-hi);
+  background: var(--surface-float);
+  transform: rotate(45deg);
+}
+.cev-ev { padding: 8px 12px; }
+.cev-ev + .cev-ev { border-top: 1px solid var(--line); }
+.cev-hd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cev-hd svg { flex-shrink: 0; }
+.cev-hd b { color: var(--text-strong); font-weight: 650; }
+.cev-time { flex: 1; min-width: 0; overflow: hidden; color: var(--text-3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.cev-dots { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.cev-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-hi); }
+.cev-row + .cev-row { margin-top: 6px; }
+.cev-name { margin: 6px 0 0; color: var(--text-strong); font-weight: 600; overflow-wrap: anywhere; }
+.cev-vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 6px 0 0; overflow: hidden; border-radius: 6px; background: var(--line); }
+.cev-vals > div { padding: 5px 8px; background: var(--surface-2); }
+.cev-vals dt { color: var(--text-3); font-size: 10.5px; }
+.cev-vals dd { margin: 2px 0 0; color: var(--text); font: 600 12.5px/1.2 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cev-tag { margin: 6px 0 0; color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.cev-due { margin: 6px 0 0; color: var(--purple-hi); font-size: 11.5px; }
+.cev-due .num { font-variant-numeric: tabular-nums; }
+.cev-more { margin: 0; padding: 6px 12px 4px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 11.5px; }

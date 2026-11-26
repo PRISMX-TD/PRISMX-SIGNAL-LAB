@@ -26,9 +26,18 @@
 // the chart fills the screen with a fixed sell | spread | buy bar, and the
 // watchlist / ticket / positions open as bottom sheets. The chart container is
 // always mounted — sheets overlay it, never unmount it.
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+//
+// 2026-11-27 阶段 6 多图布局：一张图的全部（引擎、数据、浮层、画线、区域放大……）拆进
+// components/charts/ChartPane.tsx，本页按网格挂 1–4 格（components/charts/layout/）。第 0 格仍用全站
+// 偏好（品种、周期、指标），单图时只挂这一格，与拆分前一模一样；页面的工具条、快捷键、弹窗经
+// ChartPaneHandle 作用在当前格上。
+// Phase 6 multi-chart layout (2026-11-27): everything about one chart (engine, data, overlays,
+// drawings, zoom…) moved into components/charts/ChartPane.tsx; this page mounts 1–4 cells by grid
+// (components/charts/layout/). Cell 0 still uses the app-wide prefs (symbol, interval, indicators), and a
+// single chart mounts just that cell, exactly as before the split; the page's toolbars, hotkeys and
+// dialogs act on the active cell through ChartPaneHandle.
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type RefObject } from 'react'
 import { useOverflowHint } from '../utils/useOverflowHint'
-import type { LogicalRange, Time } from 'lightweight-charts'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
@@ -42,7 +51,7 @@ import { useSheetDrag } from '../utils/useSheetDrag'
 import { useDialogA11y } from '../utils/useDialogA11y'
 import { pickDefaultAccount, useLastAccount } from '../utils/useLastAccount'
 import { useMediaQuery } from '../utils/useMediaQuery'
-import DrawLayer, { type DrawLayerHandle } from '../components/charts/DrawLayer'
+import type { DrawLayerHandle } from '../components/charts/DrawLayer'
 import IndicatorDialog from '../components/charts/ind/IndicatorDialog'
 import IndicatorEditor from '../components/charts/ind/IndicatorEditor'
 import Toast from '../components/Toast'
@@ -52,66 +61,50 @@ import WatchlistPanel from '../components/charts/WatchlistPanel'
 import AccountSummary from '../components/charts/AccountSummary'
 import OrderTicket from '../components/charts/OrderTicket'
 import PositionsDock from '../components/charts/PositionsDock'
-import PositionOverlay, { type DraftRequest } from '../components/charts/PositionOverlay'
-import TradeButtons from '../components/charts/trade/TradeButtons'
-import PlusOrderButton from '../components/charts/trade/PlusOrderButton'
-import ExecutionMarkers from '../components/charts/trade/ExecutionMarkers'
 import { useFillSound } from '../components/charts/trade/useFillSound'
 import { autoEntryType } from '../components/charts/trade/tradeMath'
-import type { ChartPlace, ChartPlaceReq } from '../components/charts/trade/useTradeActions'
-import { clampLots, defaultVolume, type SymbolSpec } from '../components/order/orderMath'
+import type { ChartPlaceReq } from '../components/charts/trade/useTradeActions'
+import { clampLots, defaultVolume } from '../components/order/orderMath'
 import ConfirmModal from '../components/ConfirmModal'
 import { useLastVolume } from '../utils/useLastVolume'
-import { brokerSymbol, clientOrderId, localizeApiError, lotDecimals } from '../api/utils'
+import { clientOrderId, localizeApiError, lotDecimals } from '../api/utils'
 import DrawToolsRow from '../components/charts/DrawToolsRow'
 import PositionMarkerToggle from '../components/charts/PositionMarkerToggle'
 import IntervalSeg from '../components/charts/IntervalSeg'
-import PaneLegends, { type LegendActions } from '../components/charts/ind/PaneLegends'
-import { useIndLayout } from '../components/charts/ind/useIndLayout'
+import { useIndLayout, type IndLayoutUpdate } from '../components/charts/ind/useIndLayout'
+import type { IndLayout } from '../components/charts/ind/types'
 import { defOf } from '../components/charts/ind/registry'
 import { MK_KEYS } from '../components/charts/ind/registry3'
-import { addInstance, duplicateInstance, moveInstance, movePane, removeInstance, removePane, setPane, updateInstance } from '../components/charts/ind/store'
+import { addInstance, normalizeLayout, removeInstance, updateInstance } from '../components/charts/ind/store'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
-import BarCountdown from '../components/charts/BarCountdown'
 import ChartSettingsDialog from '../components/charts/ChartSettingsDialog'
 import IntervalMenu from '../components/charts/IntervalMenu'
 import ChartTypeMenu from '../components/charts/ChartTypeMenu'
-import ChartLegend from '../components/charts/ChartLegend'
-import ChartBottomBar, { RANGE_INTERVAL, rangeFrom, type RangeKey } from '../components/charts/ChartBottomBar'
+import ChartBottomBar, { type RangeKey } from '../components/charts/ChartBottomBar'
 import GoToDateDialog from '../components/charts/GoToDateDialog'
 import ShortcutsDialog from '../components/charts/ShortcutsDialog'
 import QuickInput from '../components/charts/QuickInput'
-import ChartPriceLines from '../components/charts/ChartPriceLines'
-import MeasureOverlay from '../components/charts/MeasureOverlay'
 import ChartLoupe from '../components/charts/ChartLoupe'
-import BackToLatest from '../components/charts/BackToLatest'
 import ChartContextMenu, { type CtxState } from '../components/charts/ChartContextMenu'
-import { SessionBreaks } from '../components/charts/sessionBreaks'
 import { useChartHotkeys } from '../components/charts/useChartHotkeys'
 import { useChartPrefs } from '../components/charts/useChartPrefs'
 import { CHART_PALETTES, resolveChartTheme } from '../components/charts/chartTheme'
-import { makeTimeFormatters } from '../components/charts/chartTime'
-import { PRICE_BASED_TYPES, normalizeChartPrefs, type ScaleMode } from '../components/charts/chartPrefs'
-import { intervalKind, intervalLabel, isValidInterval } from '../components/charts/intervals'
-import { canCopyImage, composeScreenshot, copyScreenshot, saveScreenshot, type ShotResult } from '../components/charts/chartScreenshot'
+import { CHART_TYPE_GROUPS, normalizeChartPrefs, type ChartType, type ScaleMode } from '../components/charts/chartPrefs'
+import { isValidInterval } from '../components/charts/intervals'
+import { canCopyImage } from '../components/charts/chartScreenshot'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
-import { useChartEngine, type ChartView, type IndView } from '../components/charts/useChartEngine'
-import { useChartData, withLiveClose } from '../components/charts/useChartData'
-import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
+import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect } from '../store/live'
 import type { Order, Quote } from '../api/types'
 import { draftEntryType, type Side, type DraftFill } from '../components/order/useOrderForm'
 import {
   FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
-  priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, INTERVALS,
+  priceDigits, resolvePriceDigits, INTERVALS,
   normalizeCandleColors, dirColorsOf, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
-import { isAppHidden } from '../utils/appVisibility'
-import { serverNowMs } from '../utils/serverClock'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/terminal.css'
 import '../styles/chart-alerts.css'
-import AlertLines from '../components/charts/alert/AlertLines'
 import AlertDialog, { type AlertInit } from '../components/charts/alert/AlertDialog'
 import AlertManager from '../components/charts/alert/AlertManager'
 import { useChartAlerts } from '../components/charts/alert/alertStore'
@@ -126,13 +119,25 @@ import ProTopBar from '../components/charts/pro/ProTopBar'
 import ProWidgets, { ProAlerts, ProDetails } from '../components/charts/pro/ProWidgets'
 import ProWatchlist from '../components/charts/pro/ProWatchlist'
 import ProDrawRail from '../components/charts/pro/ProDrawRail'
-import { ProZoomBox } from '../components/charts/pro/ProZoom'
 import ProCommand, { type ProAction, type ProCommandMode } from '../components/charts/pro/ProCommand'
 import { ProDock, ProIsland, ProTabBar, type IslandEvent, type ProTab } from '../components/charts/pro/ProChrome'
-import { IcBell, IcCamera, IcClassic, IcDock, IcExpand, IcFocus, IcFx, IcGear, IcKeyboard, IcList, IcPlus, IcSpark, IcTrade, IcCalendar } from '../components/charts/pro/icons'
+import { IcBell, IcCamera, IcClassic, IcData, IcDock, IcExpand, IcFocus, IcFx, IcGear, IcKeyboard, IcList, IcPlus, IcSpark, IcTrade, IcCalendar } from '../components/charts/pro/icons'
+// 阶段 6：一格图表 + 多图布局 / phase 6: one chart cell + the multi-chart layout
+import ChartPane, { EMPTY_PANE_INFO, samePaneInfo, useScopedPendingOrders, useScopedPositions, type ChartPaneHandle, type DrawOrderCtx, type DrawOrderReq, type PaneEnv, type PaneInfo } from '../components/charts/ChartPane'
+import type { CompareEntry, PaneState } from '../components/charts/layout/paneState'
+import { DEFAULT_SYNC, MAX_PANES, cellArea, clampIdx, gridTemplate, patchPanes, visibleCells, withGrid, type GridId, type LayoutDoc, type SyncFlags } from '../components/charts/layout/layoutModel'
+import { createSyncBus } from '../components/charts/layout/syncBus'
+import { useChartLayouts } from '../components/charts/layout/useChartLayouts'
+import LayoutMenu from '../components/charts/layout/LayoutMenu'
+// 阶段 6：回放 / 对比 / 数据窗口 / phase 6: replay / compare / data window
+import { ReplayButton } from '../components/charts/replay/ReplayBar'
+import CompareDialog, { CompareButton } from '../components/charts/compare/CompareDialog'
+import type { CompareHandle } from '../components/charts/compare/useCompare'
+import DataWindow from '../components/charts/datawin/DataWindow'
+import type { CandleColors as DwCandle } from '../components/charts/chartConfig'
 
-
-type Sheet = 'watchlist' | 'trade' | 'positions' | null
+// data = 数据窗口（阶段 6）/ data = the data window (phase 6)
+type Sheet = 'watchlist' | 'trade' | 'positions' | 'data' | null
 
 // charts.interval 只写旧 App 包也认识的 8 个代码（踩坑 #220：旧包把新代码发给后端得 400）；
 // 新代码（2m、45m、2H、1W…）只存在 chartv2.prefs.interval。
@@ -164,55 +169,6 @@ function digitsSignature(quotes: Record<string, Quote>): string {
   for (const k in quotes) sig += `${k}:${quotes[k]?.digits ?? ''}|`
   return sig
 }
-
-// 按账户过滤持仓 / 挂单：scopeLogin 为 null 即不过滤（单账户或数据不带 login，见
-// ChartsPage 里 scopeLogin 的说明）。/ Positions / pending orders scoped to an
-// account; null means unscoped (see scopeLogin in ChartsPage).
-function useScopedPositions(scopeLogin: string | null) {
-  const positions = usePositions()
-  return useMemo(
-    () => (scopeLogin ? positions.filter((p) => String(p.login ?? '') === String(scopeLogin)) : positions),
-    [positions, scopeLogin],
-  )
-}
-function useScopedPendingOrders(scopeLogin: string | null) {
-  const pendingOrders = usePendingOrders()
-  return useMemo(
-    () => (scopeLogin ? pendingOrders.filter((o) => String(o.login ?? '') === String(scopeLogin)) : pendingOrders),
-    [pendingOrders, scopeLogin],
-  )
-}
-
-// 下单账户这个品种的券商合约规格（拖动读数、盈亏换算用）。只订阅三个数拼成的字符串，跳价不重渲染。
-// The trading account's contract spec for the symbol (readouts, P/L maths). Subscribes to a
-// string of the three numbers only, so ticks don't re-render.
-function useSymbolSpec(login: string | null, symbol: string): SymbolSpec {
-  const key = useAccountQuotesSelect((m) => {
-    if (!login) return ''
-    const q = m[login]?.[symbol] ?? m[login]?.[brokerSymbol(symbol)]
-    return q && q.tickSize && q.tickValue ? `${q.contractSize ?? 0}|${q.tickSize}|${q.tickValue}` : ''
-  })
-  return useMemo(() => {
-    if (!key) return undefined
-    const [c, ts, tv] = key.split('|').map(Number)
-    return { contractSize: c > 0 ? c : undefined, tickSize: ts, tickValue: tv }
-  }, [key])
-}
-
-type OverlayProps = Omit<ComponentProps<typeof PositionOverlay>, 'positions' | 'pendingOrders' | 'spec'> & { scopeLogin: string | null }
-function LiveOverlay({ scopeLogin, ...rest }: OverlayProps) {
-  const positions = useScopedPositions(scopeLogin)
-  const pendingOrders = useScopedPendingOrders(scopeLogin)
-  const spec = useSymbolSpec(rest.login, rest.symbol)
-  return <PositionOverlay {...rest} spec={spec} positions={positions} pendingOrders={pendingOrders} />
-}
-
-type ExecProps = Omit<ComponentProps<typeof ExecutionMarkers>, 'positions'> & { scopeLogin: string | null }
-function LiveExecutions({ scopeLogin, ...rest }: ExecProps) {
-  const positions = useScopedPositions(scopeLogin)
-  return <ExecutionMarkers {...rest} positions={positions} />
-}
-
 type DockProps = Omit<ComponentProps<typeof PositionsDock>, 'positions' | 'pendingOrders'> & { scopeLogin: string | null }
 function LiveDock({ scopeLogin, ...rest }: DockProps) {
   const positions = useScopedPositions(scopeLogin)
@@ -248,86 +204,46 @@ function GearButton({ onClick, label }: { onClick: () => void; label: string }) 
     </button>
   )
 }
+// 多图里 1–3 号格的指标：格子自己存 {list, panes, mainH}，收藏 / 最近 / 模板 / 默认参数仍跟全局走。
+// 按原始对象缓存洗过的结果，别的格子一变不会让这一格的指标列表换引用（否则引擎会白白重算）。
+// Indicators of cells 1–3: each stores its own {list, panes, mainH}; favourites / recent / templates /
+// defaults stay global. Normalised results are cached by the raw object, so another cell's change doesn't
+// give this cell a new list identity (the engine would recompute for nothing).
+const indNormCache = new WeakMap<object, IndLayout>()
+function paneIndOf(global: IndLayout, raw: unknown, merged: WeakMap<object, { g: IndLayout; v: IndLayout }>): IndLayout {
+  if (!raw || typeof raw !== 'object') return global
+  let n = indNormCache.get(raw)
+  if (!n) { n = normalizeLayout(raw); indNormCache.set(raw, n) }
+  const hit = merged.get(raw)
+  if (hit && hit.g === global) return hit.v
+  const v: IndLayout = { ...global, list: n.list, panes: n.panes, mainH: n.mainH }
+  merged.set(raw, { g: global, v })
+  return v
+}
+const indPart = (l: IndLayout) => ({ list: l.list, panes: l.panes, mainH: l.mainH })
+const CHART_TYPES: ReadonlySet<string> = new Set(CHART_TYPE_GROUPS.flat())
 
-// 实时 K 线收盘：券商 bid 一跳，最新一根的 close 立刻跟着动，并把 bid 留给轮询用。
-// 跨过 K 线边界后的第一跳直接在本地开新 bar（o=h=l=c=bid），不再等开盘后 ~3.3 秒的边界补拉
-// 才"卡一下"冒出来；零额外请求，随后的轮询按同一时间戳覆盖校正 O/H/L。只对按 epoch 对齐的
-// 周期（intervalSeconds）做，4H / 日线边界取决于券商时区，仍靠轮询。
-// Live bar close: each broker bid tick moves the forming bar's close and is kept for the poll.
-// The first tick past a bar boundary opens the new bar locally (o=h=l=c=bid) instead of waiting
-// ~3.3s for the boundary poll (the visible "hitch"); no extra requests, and the next poll
-// overwrites it by timestamp. Epoch-aligned intervals only; 4H / daily still rely on the poll.
-// dataKeyRef：图表里现有 K 线属于哪个「品种|周期」（useChartData 写）。切品种时本组件（子）的
-// effect 先于页面清空旧数据执行，不比对的话新品种的 bid 会被钉到旧品种最后一根上，拉出一根巨柱。
-// dataKeyRef: which "symbol|interval" the loaded candles belong to (written by useChartData). On a
-// symbol switch this child's effect runs before the page clears the old data; without the check the
-// new symbol's bid was stamped onto the old symbol's last bar, drawing one giant candle.
-function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { symbol: string; interval: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null }; dataKeyRef: { current: string } }) {
-  const bid = useGlobalQuote(symbol)?.bid ?? null
-  // 上一次处理过的 bid。engine 每次渲染都是新对象，页面一重渲染本 effect 就重跑——只有 bid 真的
-  // 变了才算一跳。以前重跑也照样开新 bar：页面在后台时全站报价不更新（live.tsx 丢弃后台帧），
-  // 可页面仍在重渲染，每过一个边界就拿过期 bid 开一根 o=h=l=c 的 bar，图上一排横线、刷新才好
-  // （2026-11-25 用户截图）。
-  // The last bid handled. engine is a new object every render, so this effect re-runs whenever
-  // the page re-renders; only a real bid change counts as a tick. Re-runs used to open bars too:
-  // while hidden the site-wide quotes freeze (live.tsx drops background frames) but the page still
-  // re-renders, so each boundary opened an o=h=l=c bar from the stale bid — a row of flat dashes
-  // until refresh (2026-11-25 user report).
-  const handledBidRef = useRef<number | null>(null)
-  useEffect(() => { liveBidRef.current = null; handledBidRef.current = null }, [symbol, liveBidRef])
-  useEffect(() => {
-    liveBidRef.current = bid
-    const isTick = bid !== handledBidRef.current
-    handledBidRef.current = bid
-    if (!isTick || isAppHidden()) return
-    const arr = engine.candlesRef.current
-    const series = engine.seriesRef.current
-    if (bid == null || !series || arr.length === 0 || dataKeyRef.current !== `${symbol}|${interval}`) return
-    const last = arr[arr.length - 1]
-    if (last.t !== engine.lastTimeRef.current) return
-    const iv = intervalSeconds(interval)
-    if (iv != null) {
-      // 用服务器校准过的时钟：手机时间不准时，Date.now() 会把新 bar 开早 / 开晚。
-      // Server-calibrated clock: a skewed device clock opened bars early / late with Date.now().
-      const openT = Math.floor(serverNowMs() / 1000 / iv) * iv
-      // 只开紧挨着的下一根：差太多说明数据断档 / 休市，交给轮询。
-      // Only the immediately next bar; a bigger gap means a data hole / closed market — leave it to the poll.
-      if (openT === last.t + iv) {
-        // 开盘价取上一根的收盘（边界前最后一跳），而不是边界后这一跳：报价是连续的，真实开盘价
-        // 几乎就是它；用 bid 做 o=h=l=c 会画出一条悬空的横线，等轮询回来再"跳"成正常蜡烛。
-        // Open at the previous close (the last tick before the boundary), not this tick: quotes
-        // are continuous, so that is ~the real open. o=h=l=c=bid drew a floating dash that then
-        // "jumped" into a normal candle when the poll landed.
-        const o = last.c
-        const bar = { t: openT, o, h: Math.max(o, bid), l: Math.min(o, bid), c: bid, v: 0 }
-        arr.push(bar)
-        if (arr.length > MAX_CLIENT_BARS) arr.shift()
-        engine.lastTimeRef.current = openT
-        engine.renderTail()
-        engine.recomputeIndicators()
-        if (engine.isFollowingLiveRef.current) engine.chartRef.current?.timeScale().scrollToRealTime()
-        return
-      }
-      // 最后一根已经是好几根之前的了（App 冻在后台刚回来）：别把现价钉到它身上——那会把一根旧蜡烛
-      // 拉成一根几十点的大阳线，看着像跳空（2026-10-08 100502 截图）。等轮询发现缺口、重拉尾部历史。
-      // The last bar is several bars old (the app just came back from being frozen): don't pin the
-      // live bid onto it — that stretched an old candle into a tall bar that looked like a gap
-      // (2026-10-08, login 100502). The poll spots the hole and refills the tail.
-      if (openT > last.t + iv) return
-    }
-    const next = withLiveClose(last, bid)
-    if (next.c === last.c && next.h === last.h && next.l === last.l) return
-    arr[arr.length - 1] = next
-    engine.renderTail()
-  }, [bid, symbol, interval, engine, liveBidRef, dataKeyRef])
-  return null
+// 数据窗口（当前格）：对比品种的值来自 useCompare 的行仓库（十字线那根），隐藏的不列
+// The data window (active cell): compare values come from useCompare's row store (the crosshair bar); hidden ones are skipped
+const NO_ROWS = { rows: [], leftInset: 0 }
+const noSub = () => () => {}
+function LiveDataWindow({ info, timezone, candle }: { info: PaneInfo; timezone: string; candle: DwCandle }) {
+  const cmp: CompareHandle | null = info.compare
+  const snap = useSyncExternalStore(cmp ? cmp.rows.subscribe : noSub, cmp ? cmp.rows.get : () => NO_ROWS)
+  const compare = useMemo(
+    () => snap.rows.filter((r) => !r.hidden).map((r) => ({ symbol: r.symbol, color: r.color, value: r.value, decimals: r.digits })),
+    [snap],
+  )
+  if (!info.ohlcStore || !info.legendStore) return null
+  return (
+    <DataWindow ohlcStore={info.ohlcStore} legendStore={info.legendStore} list={info.list} symbol={info.symbol} interval={info.interval}
+      decimals={info.decimals} timezone={timezone} candle={candle} compare={compare} />
+  )
 }
 
 export default function ChartsPage() {
   const { t } = useTranslation()
   const { getPref, setPref, loaded } = usePrefs()
-  const containerRef = useRef<HTMLDivElement>(null)
-  const drawLayerRef = useRef<DrawLayerHandle>(null)
 
   // 初始值只是尽力猜测（此刻 activeSymbols 还没从后端加载回来，无法校验是否
   // 真的还活跃）；下面那个 effect 会在 activeSymbols 就绪后校正——若猜的品种
@@ -336,6 +252,7 @@ export default function ChartsPage() {
   // loaded from the backend yet, so we can't verify it's still active); the
   // effect below corrects it once activeSymbols is ready — falls back to the
   // active list's first entry if the guess is no longer active (or empty).
+  // 阶段 6 起这是第 0 格的品种 / since phase 6 this is cell 0's symbol
   const [symbol, setSymbol] = useState<string>(
     // 走 readStorage 而不是裸 localStorage：这两行在 useState 的初始化器里，
     // 位于 ErrorBoundary 的渲染路径上——隐私模式 / 站点数据被禁用时，连属性访问
@@ -364,12 +281,11 @@ export default function ChartsPage() {
   // synced (see the persistence effects below); independent of symbol/interval.
   // 2026-11-25 阶段 4：指标是实例列表（chartv2 / ind），见 components/charts/ind/。
   // Phase 4: indicators are an instance list (chartv2 / ind), see components/charts/ind/.
+  // 阶段 6 起这是第 0 格（以及没有自己指标的格子）的指标 / since phase 6: cell 0's (and cells without their own) indicators
   const [indLayout, updateInd] = useIndLayout()
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 正在编辑设置的实例 / the instance whose settings dialog is open
   const [editUid, setEditUid] = useState<string | null>(null)
-  // 最大化的窗格（不存盘）/ maximised pane (not persisted)
-  const [maxPane, setMaxPane] = useState<string | null>(null)
   // 外部画线工具栏（DrawToolsRow / FullscreenToolbar）改的是 DrawLayer 内部状态，
   // 经 ref 调用，不会让本页重渲染——按钮的按下态就不会跟着变。这个计数器只为
   // "踢一脚重渲染"存在，值本身没人读，所以只取 setter。
@@ -445,6 +361,9 @@ export default function ChartsPage() {
   // Clicking the symbol name on desktop no longer opens that invisible watchlist sheet
   // either (it pushed a back-history entry, so the first Back did nothing visible).
   const isDesktop = useMediaQuery('(min-width: 1024px)')
+  // 多图布局只在 ≥768px（平板、桌面）显示；手机永远只显示当前格。
+  // The multi-chart grid shows at ≥768px only (tablet, desktop); phones always show just the active cell.
+  const canMulti = useMediaQuery('(min-width: 768px)')
   // 专业版终端开关。两套外壳共用同一个图表容器：下面所有外壳部件都是「条件槽位」，图表容器在
   // React 树里的位置不变，切换时不会重建图表。每次进页面都先是经典版（2026-11-26 用户要求），
   // 专业版由用户自己切，不再记住；专业版的面板宽度等布局偏好仍存在 chartv2 / pro。
@@ -500,6 +419,48 @@ export default function ChartsPage() {
   useEffect(() => {
     if (isDesktop) setSheet(null)
   }, [isDesktop])
+
+  // ── 阶段 6：多图布局 / phase 6: multi-chart layout ──
+  // cg.panes[0] 只是占位（第 0 格的品种 / 周期 / 指标来自全站偏好，见上），1–3 号格的状态在这里。
+  // cg.panes[0] is a placeholder (cell 0's symbol / interval / indicators come from the app-wide prefs
+  // above); cells 1–3 live here.
+  const [cg, setCg] = useState<LayoutDoc>(() => ({ v: 1, grid: '1', sync: { ...DEFAULT_SYNC }, active: 0, panes: [{ symbol: '', interval: '15' }] }))
+  const cgRef = useRef(cg)
+  cgRef.current = cg
+  // 最大化的格子（不存盘）/ the maximised cell (not persisted)
+  const [maxIdx, setMaxIdx] = useState<number | null>(null)
+  const { mounted, shown } = visibleCells(cg.grid, cg.active, canMulti, maxIdx)
+  const multi = mounted.length > 1
+  const activeIdx = clampIdx(cg.active, mounted.length > 1 ? mounted.length : cg.panes.length)
+  const activeRef = useRef(activeIdx)
+  activeRef.current = activeIdx
+  const paneSym = (i: number) => (i === 0 ? symbol : cg.panes[i]?.symbol || symbol)
+  const paneIv = (i: number) => (i === 0 ? interval : cg.panes[i]?.interval || interval)
+  const paneType = (i: number): ChartType | undefined => {
+    const v = i === 0 ? undefined : cg.panes[i]?.chartType
+    return v && CHART_TYPES.has(v) ? (v as ChartType) : undefined
+  }
+  // 当前格的品种 / 周期：页面上所有「当前品种」都是它（报价条、下单票、自选高亮、命令面板…）
+  // The active cell's symbol / interval: every "current symbol" on the page is this one (quote strip, ticket, watchlist highlight, palette…)
+  const activeSymbol = paneSym(activeIdx)
+  const activeInterval = paneIv(activeIdx)
+  // 各格的 ChartPaneHandle；当前格的那个就是页面工具条作用的对象
+  // Each cell's ChartPaneHandle; the active one is what the page's toolbars act on
+  const handles = useRef<(ChartPaneHandle | null)[]>([])
+  const paneRefs = useMemo(() => Array.from({ length: MAX_PANES }, (_, i) => (h: ChartPaneHandle | null) => { handles.current[i] = h }), [])
+  const act = useCallback(() => handles.current[activeRef.current] ?? null, [])
+  // 画线层 / 图表容器的「当前格代理」：画线栏、全屏读 .current 时拿到的是当前格的那个
+  // "Active cell proxies" for the drawing layer / chart container: the draw bars and fullscreen read the active cell's
+  const drawLayerRef = useMemo(() => ({ get current() { return handles.current[activeRef.current]?.drawLayer() ?? null } }) as RefObject<DrawLayerHandle>, [])
+  const containerRef = useMemo(() => ({ get current() { return handles.current[activeRef.current]?.container() ?? null } }) as RefObject<HTMLDivElement>, [])
+  const focusChart = useCallback(() => { act()?.focus() }, [act])
+  // 当前格报上来的动态状态 / the active cell's reported dynamic state
+  const [info, setInfo] = useState<PaneInfo>(EMPTY_PANE_INFO)
+  const onPaneInfo = useCallback((i: number, inf: PaneInfo) => {
+    if (i !== activeRef.current) return
+    setInfo((prev) => (samePaneInfo(prev, inf) ? prev : inf))
+  }, [])
+  const { hasData, stale, lastPrice, dayStats, drawReady } = info
 
   // 手机端全屏模式（CSS 全屏 + 原生 Fullscreen API + 横屏锁定）与全屏工具栏拖动
   // Mobile fullscreen + floating toolbar drag: see useChartFullscreen
@@ -565,7 +526,7 @@ export default function ChartsPage() {
   // to a guessed precision — hence PositionOverlay takes exactDigits.
   // 只订阅「当前品种的精度」这个原始值，跳价不会让本页重渲染。
   // Subscribes to the active symbol's precision only; ticks don't re-render the page.
-  const exactDigits = useGlobalQuotesSelect((q) => resolvePriceDigits(symbol, symbol ? q[symbol] : undefined))
+  const exactDigits = useGlobalQuotesSelect((q) => resolvePriceDigits(activeSymbol, activeSymbol ? q[activeSymbol] : undefined))
   const decimals = exactDigits ?? FALLBACK_DECIMALS
 
   // 右栏账户条展示的账户：优先在线账号，否则第一个绑定的。
@@ -634,10 +595,11 @@ export default function ChartsPage() {
   // The account chart trading places on (phase 3): the selected one when online, else none.
   const tradeLogin = activeAccount?.online ? activeAccount.login : null
   // 读一眼当前品种的买卖价，不订阅（回调里用）/ peek the symbol's bid / ask without subscribing
-  const quoteNow = useCallback(() => {
-    const q = peekQuotes()[symbol]
+  const quoteOf = useCallback((s: string) => {
+    const q = peekQuotes()[s]
     return { bid: q?.bid ?? null, ask: q?.ask ?? null }
-  }, [peekQuotes, symbol])
+  }, [peekQuotes])
+  const quoteNow = useCallback(() => quoteOf(activeSymbol), [quoteOf, activeSymbol])
   // 停靠区「全部平仓」的作用范围，必须跟 accountPositions 一个口径：多账户才限定
   // 到选中账户，否则不限（null）——单账户或数据没带 login 时，列表本来就是全部。
   // 两者一旦不一致，那个按钮就会平掉屏幕上看不见的仓位。
@@ -679,6 +641,28 @@ export default function ChartsPage() {
     if (activeSymbols.length === 0) return
     if (!activeSymbols.includes(symbol)) setSymbol(activeSymbols[0])
   }, [activeSymbols, symbol])
+  // 1–3 号格同样校正 / cells 1–3 are corrected the same way
+  useEffect(() => {
+    if (activeSymbols.length === 0) return
+    if (!cg.panes.some((p, i) => i > 0 && p.symbol && !activeSymbols.includes(p.symbol))) return
+    setCg((d) => ({ ...d, panes: d.panes.map((p, i) => (i > 0 && p.symbol && !activeSymbols.includes(p.symbol) ? { ...p, symbol: activeSymbols[0] } : p)) }))
+  }, [activeSymbols, cg.panes])
+
+  // ── 改某一格的品种 / 周期 / 图表类型（同步开着时作用到所有格）──
+  // ── set a cell's symbol / interval / chart type (all cells when that sync is on) ──
+  const setPaneSymbol = useCallback((i: number, s: string) => {
+    const all = cgRef.current.sync.symbol && cgRef.current.grid !== '1'
+    if (i === 0 || all) setSymbol(s)
+    if (i !== 0 || all) setCg((d) => patchPanes(d, i, { symbol: s }, all))
+  }, [])
+  const setPaneInterval = useCallback((i: number, c: string) => {
+    const all = cgRef.current.sync.interval && cgRef.current.grid !== '1'
+    if (i === 0 || all) setIntervalCode(c)
+    if (i !== 0 || all) setCg((d) => patchPanes(d, i, { interval: c }, all))
+  }, [])
+  const setActiveSymbol = useCallback((s: string) => setPaneSymbol(activeRef.current, s), [setPaneSymbol])
+  const setActiveInterval = useCallback((c: string) => setPaneInterval(activeRef.current, c), [setPaneInterval])
+  const paneIntervalSetters = useMemo(() => Array.from({ length: MAX_PANES }, (_, i) => (c: string) => setPaneInterval(i, c)), [setPaneInterval])
 
   // /charts?symbol=XAUUSD（警报通知点进来）：云端偏好到了之后切过去，再把参数抹掉。
   // 品种名大小写按活跃列表对齐（警报里存的是大写）。
@@ -688,8 +672,8 @@ export default function ChartsPage() {
   const wantSymbol = searchParams.get('symbol')
   const pickSymbolLoose = useCallback((s: string) => {
     const up = s.toUpperCase()
-    setSymbol(activeSymbols.find((x) => x.toUpperCase() === up) ?? s)
-  }, [activeSymbols])
+    setActiveSymbol(activeSymbols.find((x) => x.toUpperCase() === up) ?? s)
+  }, [activeSymbols, setActiveSymbol])
   useEffect(() => {
     if (!wantSymbol || !loaded || activeSymbols.length === 0) return
     pickSymbolLoose(wantSymbol)
@@ -710,6 +694,14 @@ export default function ChartsPage() {
     // Don't write chartv2 before the cloud prefs arrive: the debounced save would overwrite them with defaults.
     if (loaded) updatePrefs((p) => (p.interval === interval ? p : { ...p, interval }))
   }, [interval, setPref, loaded, updatePrefs])
+  // 当前格的图表类型：第 0 格 = 全局；其它格自己存（没存就跟全局）
+  // The active cell's chart type: cell 0 = the global one; the others store their own (else follow the global)
+  const activeChartType = paneType(activeIdx) ?? cprefs.chartType
+  const setActiveChartType = useCallback((v: ChartType) => {
+    const i = activeRef.current
+    if (i === 0) updatePrefs({ chartType: v })
+    else setCg((d) => patchPanes(d, i, { chartType: v }, false))
+  }, [updatePrefs])
 
   // 指标开关/参数落库：与 symbol/interval 同一套模式——setState 的更新函数
   // 只做纯粹的状态计算，落库放到单独的 effect 里对状态变化作出反应，绝不在
@@ -767,9 +759,37 @@ export default function ChartsPage() {
     const id = window.setInterval(() => refreshUser(), 5 * 60_000)
     return () => window.clearInterval(id)
   }, [refreshUser])
+
+  // ── 每格的指标布局：第 0 格 = 全局；1–3 号格各存一份（没存就跟全局）──
+  // ── per-cell indicator layout: cell 0 = the global one; cells 1–3 keep their own (else follow the global) ──
+  const mergedIndCache = useRef(new WeakMap<object, { g: IndLayout; v: IndLayout }>())
+  const paneIndList = useMemo(
+    () => Array.from({ length: MAX_PANES }, (_, i) => (i === 0 ? indLayout : paneIndOf(indLayout, cg.panes[i]?.ind, mergedIndCache.current))),
+    [indLayout, cg.panes],
+  )
+  const paneIndRef = useRef(paneIndList)
+  paneIndRef.current = paneIndList
+  const paneIndUpdaters = useMemo(() => Array.from({ length: MAX_PANES }, (_, i): ((u: IndLayoutUpdate) => void) => {
+    if (i === 0) return updateInd
+    return (u) => {
+      const cur = paneIndRef.current[i]
+      const next = u(cur)
+      if (next === cur) return
+      // 收藏 / 最近 / 模板 / 默认参数是用户级的，写回全局 / favourites / recent / templates / defaults are per user: write them globally
+      if (next.favs !== cur.favs || next.recent !== cur.recent || next.tpls !== cur.tpls || next.defaults !== cur.defaults) {
+        updateInd((g) => ({ ...g, favs: next.favs, recent: next.recent, tpls: next.tpls, defaults: next.defaults }))
+      }
+      if (next.list !== cur.list || next.panes !== cur.panes || next.mainH !== cur.mainH) {
+        const part = indPart(next)
+        setCg((d) => ({ ...d, panes: d.panes.map((p, j) => (j === i ? { ...p, ind: part } : p)) }))
+      }
+    }
+  }), [updateInd])
+  const activeInd = paneIndList[activeIdx] ?? indLayout
+  const updateActiveInd = useCallback((u: IndLayoutUpdate) => paneIndUpdaters[activeRef.current]?.(u), [paneIndUpdaters])
   const shownList = useMemo(
-    () => (isPro ? indLayout.list : indLayout.list.filter((i) => !defOf(i.type)?.pro)),
-    [indLayout.list, isPro],
+    () => (isPro ? activeInd.list : activeInd.list.filter((i) => !defOf(i.type)?.pro)),
+    [activeInd.list, isPro],
   )
   // 指标标记文字：合作指标的买卖字样 + 第三批的形态名、表格行名等（charts.ind.mk.*，以 'mk.' 前缀查）
   // Indicator marker texts: partner buy / sell words plus batch 3 pattern names, table rows etc. (charts.ind.mk.*, looked up as 'mk.<key>')
@@ -782,10 +802,9 @@ export default function ChartsPage() {
 
 
   // 图表实例、指标 series、图例、pane 高度 → useChartEngine；历史 / 翻页 / 轮询 → useChartData。
-  // 图表现在从不被藏起，refitKey 只在进出全屏时变（那两次容器尺寸确实变了）。
-  // Chart instance / indicator series / legend / panes → useChartEngine; history /
-  // paging / polling → useChartData. The chart is never hidden any more, so the
-  // refit key only changes on entering/leaving fullscreen (a real resize).
+  // 阶段 6 起两者都在 ChartPane 里，每格一份。
+  // Chart instance / indicator series / legend / panes → useChartEngine; history / paging / polling →
+  // useChartData. Since phase 6 both live in ChartPane, one per cell.
   // 引擎的外观输入：主题色板、时区时间格式、坐标模式、K 线部件……全部来自 chartv2。
   // The engine's look: palette, timezone formatters, scale mode, candle parts… all from chartv2.
   const { i18n } = useTranslation()
@@ -796,67 +815,6 @@ export default function ChartsPage() {
     const base = CHART_PALETTES[themeName]
     return cprefs.canvas.bg ? { ...base, bg: cprefs.canvas.bg } : base
   }, [themeName, cprefs.canvas.bg])
-  const ivKind = intervalKind(interval)
-  const timeFmt = useMemo(() => makeTimeFormatters(cprefs.timezone, ivKind, lang), [cprefs.timezone, ivKind, lang])
-  // 画线层：轴标签 / 坐标页签的时间格式与画布底色 / drawing layer: time labels and canvas colours
-  const drawFmtTime = useCallback((x: number) => timeFmt.crosshair(x as Time), [timeFmt])
-  const drawTheme = useMemo(() => ({ bg: palette.bg, text: palette.text }), [palette.bg, palette.text])
-  const watermark = cprefs.canvas.watermark && symbol ? `${symbol} · ${intervalLabel(interval)}` : null
-  const view = useMemo<ChartView>(() => ({
-    chartType: cprefs.chartType,
-    palette,
-    candle: cprefs.candle,
-    lineWidth: cprefs.lineWidth,
-    lineColor: cprefs.lineColor,
-    scaleMode: cprefs.scaleMode,
-    invertScale: cprefs.invertScale,
-    grid: cprefs.canvas.grid,
-    crosshair: cprefs.canvas.crosshair,
-    crossStyle: cprefs.canvas.crossStyle,
-    rightOffset: cprefs.canvas.rightOffset,
-    lastPrice: cprefs.lines.lastPrice,
-    indicatorLabels: cprefs.lines.indicatorLabels,
-    transform: cprefs.transform,
-    watermark,
-    time: timeFmt,
-  }), [cprefs.chartType, palette, cprefs.candle, cprefs.lineWidth, cprefs.lineColor, cprefs.scaleMode, cprefs.invertScale, cprefs.canvas.grid, cprefs.canvas.crosshair, cprefs.canvas.crossStyle, cprefs.canvas.rightOffset, cprefs.lines.lastPrice, cprefs.lines.indicatorLabels, cprefs.transform, watermark, timeFmt])
-  const priceBased = PRICE_BASED_TYPES.has(cprefs.chartType)
-  // 买卖按钮：桌面常驻；手机平时底部已有交易条，只在全屏横屏时显示。
-  // Buy / sell buttons: always on desktop; phones already have the bottom trade bar, so fullscreen only.
-  // 专业版手机没有底部交易条（换成了标签栏），买卖按钮浮在图上。
-  // The pro phone layout has no bottom trade bar (a tab bar instead), so the buttons float on the chart.
-  const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen || pro)
-
-  const indView = useMemo<IndView>(() => ({
-    list: shownList, panes: indLayout.panes, mainH: indLayout.mainH, maxPane, interval, digits: decimals, symbol,
-  }), [shownList, indLayout.panes, indLayout.mainH, maxPane, interval, decimals, symbol])
-  // 拖窗格分隔条后把像素高度存成权重（比例不变，换屏幕尺寸照样成立）
-  // After a separator drag, store the pixel heights as weights (ratios survive other screen sizes)
-  const onPaneResize = useCallback((mainPx: number, panes: Record<string, number>) => {
-    updateInd((l) => ({ ...l, mainH: Math.max(0.1, mainPx / 100), panes: l.panes.map((p) => (panes[p.id] != null ? { ...p, h: Math.max(0.1, panes[p.id] / 100) } : p)) }))
-  }, [updateInd])
-  const engine = useChartEngine(containerRef, indView, isFullscreen, candleColors, markerText, view, onPaneResize)
-  const { chartRef, seriesRef, getBarTimes, legendStore, paneBoxes, drawReady } = engine
-  const legendActions = useMemo<LegendActions>(() => ({
-    toggleHidden: (uid) => updateInd((l) => updateInstance(l, uid, (i) => ({ ...i, hidden: !i.hidden || undefined }))),
-    settings: (uid) => setEditUid(uid),
-    remove: (uid) => updateInd((l) => removeInstance(l, uid)),
-    duplicate: (uid) => updateInd((l) => duplicateInstance(l, uid)),
-    moveTo: (uid, target) => updateInd((l) => moveInstance(l, uid, target)),
-    scale: (uid, pin) => updateInd((l) => updateInstance(l, uid, { scale: pin })),
-    saveDefault: (uid) => updateInd((l) => {
-      const i = l.list.find((x) => x.uid === uid)
-      return i ? { ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } } : l
-    }),
-    paneMove: (id, dir) => updateInd((l) => movePane(l, id, dir)),
-    paneMax: (id) => setMaxPane(id),
-    paneCollapse: (id, collapsed) => updateInd((l) => setPane(l, id, { collapsed: collapsed || undefined })),
-    paneRemove: (id) => { updateInd((l) => removePane(l, id)); setMaxPane((m) => (m === id ? null : m)) },
-  }), [updateInd])
-  const addIndicator = useCallback((type: string) => { updateInd((l) => addInstance(l, type)?.layout ?? l) }, [updateInd])
-  const liveBidRef = useRef<number | null>(null)
-  const dataKeyRef = useRef('')
-  const { hasData, stale, lastPrice, dayStats, ensureHistory } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
 
   // ── 阶段 1 的图表交互 / phase-1 chart interactions ──
   const cvRef = useRef<HTMLDivElement>(null)
@@ -866,9 +824,6 @@ export default function ChartsPage() {
   const [quick, setQuick] = useState<string | null>(null)
   const [measureOn, setMeasureOn] = useState(false)
   const [ctx, setCtx] = useState<CtxState | null>(null)
-  const [rangeBusy, setRangeBusy] = useState(false)
-  const chartBoxRef = useRef<HTMLDivElement>(null)
-  const focusChart = useCallback(() => { chartBoxRef.current?.focus({ preventScroll: true }) }, [])
 
   // ── 阶段 5：图表警报 / phase 5: chart alerts ──
   // 新建 / 编辑弹窗的起点（null = 关）与管理器开关；触发时在图表页弹一条提示（站内通知 / 推送另由后端发）。
@@ -892,83 +847,22 @@ export default function ChartsPage() {
   const dismissIsland = useCallback(() => setIsland(null), [])
   const setFavIntervals = useCallback((codes: string[]) => updatePrefs({ favIntervals: codes }), [updatePrefs])
   const setScaleMode = useCallback((m: ScaleMode) => updatePrefs({ scaleMode: m }), [updatePrefs])
-  const autoScale = useCallback(() => { chartRef.current?.priceScale('right').applyOptions({ autoScale: true }) }, [chartRef])
-  const resetView = useCallback(() => {
-    const c = chartRef.current
-    if (!c) return
-    c.timeScale().resetTimeScale()
-    c.priceScale('right').applyOptions({ autoScale: true })
-  }, [chartRef])
+  const autoScale = useCallback(() => { act()?.autoScale() }, [act])
+  const resetView = useCallback(() => { act()?.resetView() }, [act])
 
-  // 截图 / screenshot
-  const shotToast = useCallback((r: ShotResult) => {
-    if (r === 'saved') showToast(t('charts.shot.saved'), 'success')
-    else if (r === 'copied') showToast(t('charts.shot.copied'), 'success')
-    else if (r === 'unsupported') showToast(t('charts.shot.unsupported'), 'error')
-    else showToast(t('charts.shot.failed'), 'error')
-  }, [showToast, t])
-  const takeShot = useCallback(async (mode: 'save' | 'copy') => {
-    const c = chartRef.current
-    if (!c) return
-    const now = Math.floor(Date.now() / 1000)
-    const canvas = composeScreenshot(c, `${symbol} · ${intervalLabel(interval)} · ${timeFmt.crosshair(now as never)}`, palette.bg, palette.text)
-    const d = new Date()
-    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`
-    shotToast(mode === 'copy' ? await copyScreenshot(canvas) : await saveScreenshot(canvas, `${symbol}_${intervalLabel(interval)}_${stamp}`))
-  }, [chartRef, symbol, interval, timeFmt, palette, shotToast])
+  // 截图（当前格）/ screenshot (the active cell)
+  const takeShot = useCallback(async (mode: 'save' | 'copy') => { await act()?.takeShot(mode) }, [act])
 
-  // 时间范围快捷键：先切到对应周期，等新数据到了再补历史、设可见范围。
-  // Range presets: switch to the matching interval, then once its data is in, page history
-  // as needed and set the visible range.
-  const pendingRangeRef = useRef<{ k: RangeKey; tries: number } | null>(null)
-  const [rangeTick, setRangeTick] = useState(0)
-  const applyRange = useCallback((k: RangeKey) => {
-    pendingRangeRef.current = { k, tries: 0 }
-    const iv = RANGE_INTERVAL[k]
-    if (iv !== interval) setIntervalCode(iv)
-    setRangeTick((x) => x + 1)
-  }, [interval])
-  useEffect(() => {
-    const job = pendingRangeRef.current
-    if (!job) return
-    const c = chartRef.current
-    if (!c || dataKeyRef.current !== `${symbol}|${interval}` || engine.candlesRef.current.length === 0) {
-      // 新周期的数据还没到：稍后再看（最多约 10 秒）/ new data not in yet: look again (≤ ~10s)
-      if (job.tries++ > 40) { pendingRangeRef.current = null; return }
-      const id = window.setTimeout(() => setRangeTick((x) => x + 1), 250)
-      return () => window.clearTimeout(id)
-    }
-    pendingRangeRef.current = null
-    const from = rangeFrom(job.k)
-    if (from == null) { c.timeScale().fitContent(); return }
-    let alive = true
-    setRangeBusy(true)
-    ensureHistory(from).finally(() => {
-      if (!alive) return
-      setRangeBusy(false)
-      const to = Math.floor(Date.now() / 1000)
-      try { chartRef.current?.timeScale().setVisibleRange({ from: from as never, to: to as never }) } catch { /* 无数据 / no data */ }
-    })
-    return () => { alive = false; setRangeBusy(false) }
-  }, [rangeTick, symbol, interval, hasData, chartRef, engine.candlesRef, ensureHistory])
-
-  // 跳转到日期：补够历史后把那一根放到屏幕中间。/ Go to date: page enough history, then centre that bar.
-  const goToTime = useCallback(async (ts: number) => {
-    setRangeBusy(true)
-    try { await ensureHistory(ts) } finally { setRangeBusy(false) }
-    const c = chartRef.current
-    if (!c) return
-    const times = engine.barTimesRef.current
-    if (times.length === 0) return
-    let lo = 0
-    let hi = times.length - 1
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < ts) lo = mid + 1; else hi = mid }
-    const ts2 = c.timeScale()
-    const r = ts2.getVisibleLogicalRange()
-    const half = r ? Math.max(10, (r.to - r.from) / 2) : 60
-    ts2.setVisibleLogicalRange({ from: lo - half, to: lo + half })
-    if (lo === 0 && times[0] > ts) showToast(t('charts.goto.earliest'), 'error')
-  }, [ensureHistory, chartRef, engine.barTimesRef, showToast, t])
+  // 时间范围快捷键 / 跳转到日期：作用在当前格；「日期范围」同步开着时作用到每一格。
+  // Range presets / go to date: on the active cell, or on every cell while "date range" sync is on.
+  const dateTargets = useCallback((): ChartPaneHandle[] => {
+    const d = cgRef.current
+    const all = d.sync.date && d.grid !== '1' && canMulti
+    const idxs = all ? Array.from({ length: mounted.length }, (_, i) => i) : [activeRef.current]
+    return idxs.map((i) => handles.current[i]).filter((h): h is ChartPaneHandle => !!h)
+  }, [canMulti, mounted.length])
+  const applyRange = useCallback((k: RangeKey) => { dateTargets().forEach((h) => h.applyRange(k)) }, [dateTargets])
+  const goToTime = useCallback(async (ts: number) => { await Promise.all(dateTargets().map((h) => h.goToTime(ts))) }, [dateTargets])
 
   // 键盘快捷键（列表见 ShortcutsDialog）/ keyboard shortcuts (listed in ShortcutsDialog)
   useChartHotkeys(cvRef, {
@@ -978,9 +872,9 @@ export default function ChartsPage() {
     toggleLog: () => setScaleMode(cprefs.scaleMode === 1 ? 0 : 1),
     togglePercent: () => setScaleMode(cprefs.scaleMode === 2 ? 0 : 2),
     toggleInvert: () => updatePrefs({ invertScale: !cprefs.invertScale }),
-    scroll: (n) => { const ts = chartRef.current?.timeScale(); if (ts) ts.scrollToPosition(ts.scrollPosition() + n, false) },
+    scroll: (n) => { const ts = act()?.chart()?.timeScale(); if (ts) ts.scrollToPosition(ts.scrollPosition() + n, false) },
     zoom: (f) => {
-      const ts = chartRef.current?.timeScale()
+      const ts = act()?.chart()?.timeScale()
       if (!ts) return
       ts.applyOptions({ barSpacing: Math.max(0.5, Math.min(60, ts.options().barSpacing * f)) })
     },
@@ -989,56 +883,132 @@ export default function ChartsPage() {
     alert: () => openAlert({ price: quoteNow().bid ?? undefined }),
   }, !isFullscreen)
 
-  // 交易日分隔线 primitive / session-break primitive
-  const breaksRef = useRef<SessionBreaks | null>(null)
-  const breaksOn = cprefs.lines.sessionBreaks && ivKind === 'intraday' && !priceBased
-  useEffect(() => {
-    const series = seriesRef.current
-    if (!drawReady || !series || !breaksOn) return
-    const sb = new SessionBreaks()
-    sb.enabled = true
-    sb.color = palette.sessionBreak
-    series.attachPrimitive(sb)
-    breaksRef.current = sb
-    return () => { try { series.detachPrimitive(sb) } catch { /* 图表已销毁 / chart gone */ } breaksRef.current = null }
-  }, [drawReady, seriesRef, breaksOn, palette.sessionBreak])
-
-  // 右键菜单（桌面）/ context menu (desktop)
-  const onChartContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDesktop || e.defaultPrevented) return
-    const c = chartRef.current
-    const s = seriesRef.current
-    const host = containerRef.current
-    if (!c || !s || !host) return
-    e.preventDefault()
-    const r = host.getBoundingClientRect()
-    const x = e.clientX - r.left
-    const y = e.clientY - r.top
-    const zone = x > c.timeScale().width() ? 'price' : 'pane'
-    const price = s.coordinateToPrice(y)
-    setCtx({ x: e.clientX, y: e.clientY, zone, price: price == null ? null : Number(price) })
-  }, [isDesktop, chartRef, seriesRef])
   const closeCtx = useCallback(() => setCtx(null), [])
   const doneMeasure = useCallback(() => setMeasureOn(false), [])
   // 专业版左栏：区域放大（每放大一次记下之前的范围，缩小逐级退回）、一键隐藏 / 删除全部指标
   // Pro left bar: zoom-in area (each zoom remembers the previous range; zoom-out steps back) and
   // hide / remove all indicators at once
   const [zoomOn, setZoomOn] = useState(false)
-  const [zoomStack, setZoomStack] = useState<LogicalRange[]>([])
-  useEffect(() => { setZoomStack([]); setZoomOn(false) }, [symbol, interval])
-  const zoomOut = () => {
-    const prev = zoomStack[zoomStack.length - 1]
-    if (prev) chartRef.current?.timeScale().setVisibleLogicalRange(prev)
-    setZoomStack(zoomStack.slice(0, -1))
-  }
+  const endZoom = useCallback(() => setZoomOn(false), [])
+  // 换品种 / 周期 / 当前格时收起区域放大与测量 / switching symbol / interval / active cell drops zoom-in and measure
+  useEffect(() => { setZoomOn(false) }, [activeSymbol, activeInterval])
+  useEffect(() => { setZoomOn(false); setMeasureOn(false) }, [activeIdx])
+  const zoomOut = () => { act()?.zoomOut() }
   const indAllHidden = shownList.length > 0 && shownList.every((i) => i.hidden)
   const hideAllIndicators = useCallback((hide: boolean) => {
-    updateInd((l) => ({ ...l, list: l.list.map((i) => ({ ...i, hidden: hide || undefined })) }))
-  }, [updateInd])
+    updateActiveInd((l) => ({ ...l, list: l.list.map((i) => ({ ...i, hidden: hide || undefined })) }))
+  }, [updateActiveInd])
   const removeAllIndicators = useCallback(() => {
-    updateInd((l) => l.list.reduce((acc, i) => removeInstance(acc, i.uid), l))
-    setMaxPane(null)
-  }, [updateInd])
+    updateActiveInd((l) => l.list.reduce((acc, i) => removeInstance(acc, i.uid), l))
+  }, [updateActiveInd])
+  const addIndicator = useCallback((type: string) => { updateActiveInd((l) => addInstance(l, type)?.layout ?? l) }, [updateActiveInd])
+
+  // ── 网格 / 同步 / 当前格 / 最大化 / grid / sync / active cell / maximise ──
+  const setActivePane = useCallback((i: number) => {
+    setCg((d) => (d.active === i ? d : { ...d, active: i }))
+  }, [])
+  const toggleMax = useCallback((i: number) => {
+    setActivePane(i)
+    setMaxIdx((m) => (m === i ? null : i))
+  }, [setActivePane])
+  useBackToClose(maxIdx != null && multi, () => setMaxIdx(null))
+  // Esc 还原最大化的格子（焦点在图表区、没有别的浮层先拿走 Esc 时）
+  // Escape restores a maximised cell (while focus is in the chart area and nothing else took the key)
+  useEffect(() => {
+    if (maxIdx == null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const scope = cvRef.current
+      if (scope && document.activeElement && !scope.contains(document.activeElement) && document.activeElement !== document.body) return
+      setMaxIdx(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maxIdx])
+  // 新格子从当前格复制品种 / 周期 / 图表类型 / 指标 / new cells copy the active cell's symbol / interval / chart type / indicators
+  const setGrid = useCallback((g: GridId) => {
+    const i = activeRef.current
+    const seed: PaneState = { symbol: paneSym(i), interval: paneIv(i), ind: indPart(paneIndRef.current[i] ?? indLayout) }
+    const ct = paneType(i)
+    if (ct) seed.chartType = ct
+    else if (i === 0) seed.chartType = cprefs.chartType
+    setCg((d) => withGrid(d, g, seed))
+    setMaxIdx(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- paneSym / paneIv / paneType read this render's state
+  }, [symbol, interval, cg.panes, indLayout, cprefs.chartType])
+  // 打开品种 / 周期同步时，先把当前格的值铺到所有格 / turning symbol / interval sync on spreads the active cell's value to all
+  const setSync = useCallback((patch: Partial<SyncFlags>) => {
+    const i = activeRef.current
+    setCg((d) => {
+      let next: LayoutDoc = { ...d, sync: { ...d.sync, ...patch } }
+      if (patch.symbol) next = patchPanes(next, i, { symbol: i === 0 ? symbol : d.panes[i]?.symbol }, true)
+      if (patch.interval) next = patchPanes(next, i, { interval: i === 0 ? interval : d.panes[i]?.interval }, true)
+      return next
+    })
+    if (patch.symbol && i !== 0) { const s = cgRef.current.panes[i]?.symbol; if (s) setSymbol(s) }
+    if (patch.interval && i !== 0) { const c = cgRef.current.panes[i]?.interval; if (c) setIntervalCode(c) }
+  }, [symbol, interval])
+  const onCompareChange = useCallback((i: number, c: CompareEntry[]) => {
+    setCg((d) => ({ ...d, panes: d.panes.map((p, j) => (j === i ? { ...p, compare: c } : p)) }))
+  }, [])
+
+  // 十字线 / 可见范围同步总线 / the crosshair / visible-range sync bus
+  const syncBus = useMemo(() => createSyncBus(), [])
+  useEffect(() => { syncBus.setActive(activeIdx) }, [syncBus, activeIdx])
+  useEffect(() => {
+    syncBus.setFlags({ crosshair: multi && cg.sync.crosshair, time: multi && cg.sync.time })
+  }, [syncBus, multi, cg.sync.crosshair, cg.sync.time])
+
+  // 布局保存 / 载入 / 自动保存（第 0 格按全站偏好填进去）/ layout save / load / autosave (cell 0 filled from the app-wide prefs)
+  const layoutDoc = useMemo<LayoutDoc>(() => ({
+    ...cg,
+    active: activeIdx,
+    panes: cg.panes.slice(0, MAX_PANES).map((p, i) => (i === 0 ? { ...p, symbol, interval, chartType: cprefs.chartType, ind: indPart(indLayout) } : p)),
+  }), [cg, activeIdx, symbol, interval, cprefs.chartType, indLayout])
+  const applyLayoutDoc = useCallback((d: LayoutDoc, full: boolean) => {
+    const fixIv = (c: string) => (isValidInterval(c) ? c : interval)
+    if (full) {
+      const p0 = d.panes[0]
+      if (p0?.symbol) setSymbol(p0.symbol)
+      if (p0?.interval && isValidInterval(p0.interval)) setIntervalCode(p0.interval)
+      if (p0?.chartType && CHART_TYPES.has(p0.chartType)) updatePrefs({ chartType: p0.chartType as ChartType })
+      if (p0?.ind) {
+        const n = normalizeLayout(p0.ind)
+        updateInd((g) => ({ ...g, list: n.list, panes: n.panes, mainH: n.mainH }))
+      }
+    }
+    setCg({ ...d, panes: d.panes.map((p, i) => (i === 0 ? p : { ...p, interval: fixIv(p.interval) })) })
+    setMaxIdx(null)
+  }, [interval, updatePrefs, updateInd])
+  const layouts = useChartLayouts({
+    ready: loaded,
+    doc: layoutDoc,
+    fallback: { symbol, interval },
+    apply: applyLayoutDoc,
+    onError: (m) => showToast(m ? localizeApiError(m) : String(t('charts.layout.err')), 'error'),
+    defaultName: String(t('charts.layout.defaultName')),
+    copyName: (name) => String(t('charts.layout.copyName', { name })),
+    tooBig: String(t('charts.layout.tooBig')),
+  })
+  // 对比设置弹窗开在哪一格（null = 关）/ which cell's compare dialog is open (null = closed)
+  const [cmpIdx, setCmpIdx] = useState<number | null>(null)
+  const openCompareFor = useCallback((i: number) => setCmpIdx(i), [])
+  useBackToClose(cmpIdx != null, () => setCmpIdx(null))
+  const activeCompare = cg.panes[activeIdx]?.compare ?? []
+
+  // 回放 / 对比按钮（当前格）/ replay / compare buttons (the active cell)
+  const replayBtn = (cls: string, label = false) => info.replay
+    ? <ReplayButton replay={info.replay} disabled={!hasData} className={cls} showLabel={label} />
+    : null
+  const compareBtn = (cls: string, label = false) => (
+    <CompareButton count={activeCompare.length} onClick={() => openCompareFor(activeIdx)} className={cls} showLabel={label} />
+  )
+  // 专业版右栏「对象树」面板的容器（callback ref → state，当前格把对象树 portal 进来）
+  // The pro right panel's object-tree host (callback ref → state; the active cell portals its tree in)
+  const [treeHost, setTreeHost] = useState<HTMLDivElement | null>(null)
+  const layoutMenu = (variant: 'classic' | 'pro') => canMulti
+    ? <LayoutMenu variant={variant} grid={cg.grid} onGrid={setGrid} sync={cg.sync} onSync={setSync} api={layouts} onToast={showToast} />
+    : null
 
   // 手机报价条第二行：左边约 2/3 是常驻的画线工具横条（左右滑动看全部工具），
   // 右边是「指标」和设置齿轮（设置里含显示持仓开关）。底部工具条只留周期与持仓，一行放得下。
@@ -1059,6 +1029,11 @@ export default function ChartsPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z" /><path d="M10 21h4" /></svg>
           {activeAlertCount > 0 && <b>{activeAlertCount}</b>}
         </button>
+        {compareBtn('term-tbr-btn')}
+        {replayBtn('term-tbr-btn')}
+        <button type="button" onClick={() => setSheet('data')} className="term-tbr-btn" aria-label={String(t('charts.pro.w.data'))} title={String(t('charts.pro.w.data'))}>
+          <IcData size={14} />
+        </button>
         <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
         <button type="button" onClick={() => setLayout('pro')} className="term-tbr-btn pt-entry" aria-label={String(t('charts.pro.enter'))} title={String(t('charts.pro.enter'))}>
           <IcSpark size={13} />{t('charts.pro.short')}
@@ -1068,8 +1043,8 @@ export default function ChartsPage() {
   )
 
   // ── 专业版终端：命令面板动作、手机标签栏 / pro terminal: palette actions, phone tab bar ──
-  const pickSymbolPro = useCallback((s: string) => { setSymbol(s); focusChart() }, [focusChart])
-  const pickIntervalPro = useCallback((c: string) => { setIntervalCode(c); focusChart() }, [focusChart])
+  const pickSymbolPro = useCallback((s: string) => { setActiveSymbol(s); focusChart() }, [focusChart, setActiveSymbol])
+  const pickIntervalPro = useCallback((c: string) => { setActiveInterval(c); focusChart() }, [focusChart, setActiveInterval])
   const addIndicatorPro = useCallback((id: string) => {
     if (defOf(id)?.pro && !isPro) { setSettingsOpen(true); return }
     addIndicator(id)
@@ -1087,7 +1062,6 @@ export default function ChartsPage() {
   useBackToClose(measureOn, () => setMeasureOn(false))
   useBackToClose(zoomOn, () => setZoomOn(false))
   useBackToClose(ctx != null, () => setCtx(null))
-  useBackToClose(maxPane != null, () => setMaxPane(null))
   useBackToClose(pro, () => setLayout('classic'))
   const toggleFocus = useCallback(() => updatePro((p) => ({ ...p, focus: !p.focus })), [updatePro])
   const proActions = useMemo<ProAction[]>(() => {
@@ -1120,7 +1094,7 @@ export default function ChartsPage() {
 
   const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
   const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
-  const pickFromSheet = useCallback((s: string) => { setSymbol(s); setSheet(null) }, [])
+  const pickFromSheet = useCallback((s: string) => { setActiveSymbol(s); setSheet(null) }, [setActiveSymbol])
 
   // 稳定的下单回调：OrderTicket 已 memo，内联箭头函数会让它每次都重渲染。
   // A stable place callback: OrderTicket is memoized and an inline arrow would defeat it.
@@ -1128,7 +1102,7 @@ export default function ChartsPage() {
       async (side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) => {
         // silent：下单票按钮下面有就地回执，不在屏幕正中再弹同一句（见 hooks.ts 的 SubmitOrderOptions）。
         // silent: the ticket shows an inline receipt under its button; no centred repeat.
-        const placed = await placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price, { silent: true })
+        const placed = await placeManualOrder(activeSymbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price, { silent: true })
         // 只在「这一单是从手机的下单抽屉里下的」时才切。判据就是抽屉当时开在
         // trade 上——桌面右栏下单时 sheet 恒为 null，绝不会误触发（桌面本来就
         // 三栏全见，也没有「切过去」这回事）。
@@ -1153,32 +1127,24 @@ export default function ChartsPage() {
         }
         return placed
       },
-      [placeManualOrder, reportPlaced, symbol, afterPlaceOpen],
+      [placeManualOrder, reportPlaced, activeSymbol, afterPlaceOpen],
   )
 
   // 图上发起的下单（反手、投影单、买卖按钮）：走同一个 placeManualOrder，结果照常弹提示。
-  // 接口报错在这里提示并返回 undefined，调用方当作没成功处理。
+  // 接口报错在这里提示并返回 undefined，调用方当作没成功处理。品种由发起的那一格给出。
   // Orders started on the chart (reverse, projected order, buy / sell buttons) share
   // placeManualOrder and toast as usual. API errors are toasted here and come back undefined.
-  const chartPlace = useCallback<ChartPlace>(async (r): Promise<Order | void> => {
+  // The symbol comes from the cell that started it.
+  const chartPlace = useCallback(async (sym: string, r: ChartPlaceReq): Promise<Order | void> => {
     try {
-      return await placeManualOrder(symbol, r.side, r.volume, r.login, r.sl, r.tp, clientOrderId(), r.type, r.price)
+      return await placeManualOrder(sym, r.side, r.volume, r.login, r.sl, r.tp, clientOrderId(), r.type, r.price)
     } catch (e) {
       showToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')), 'error')
       return undefined
     }
-  }, [placeManualOrder, showToast, symbol, t])
+  }, [placeManualOrder, showToast, t])
 
-  // 图上投影单：右键菜单、价格轴边的「+」、多空仓位工具的「转为订单」都从这里开一张。
-  // The projected order: opened from the context menu, the "+" button or a long/short drawing.
-  const [draftReq, setDraftReq] = useState<DraftRequest | null>(null)
-  const openDraft = useCallback((side: 'BUY' | 'SELL', price: number, sl?: number | null, tp?: number | null) => {
-    const f = exactDigits != null ? Math.pow(10, exactDigits) : null
-    const r = (v: number | null | undefined) => (v == null ? null : f != null ? Math.round(v * f) / f : v)
-    setShowPositions(true)
-    setDraftReq({ nonce: Date.now(), side, price: r(price) as number, sl: r(sl), tp: r(tp) })
-  }, [exactDigits])
-  useFillSound(accountOrders, symbol, cprefs.trading.sound)
+  useFillSound(accountOrders, activeSymbol, cprefs.trading.sound)
 
   // 多空仓位工具的「下单」：按画线的方向、入场、止损、止盈和图上显示的手数直接下单（先弹确认；开了
   // 一键下单就不确认）。入场价离现价近按市价，否则自动选限价 / 止损挂单。没有在线账户时退回填下单票
@@ -1189,58 +1155,76 @@ export default function ChartsPage() {
   // (which explains why); in fullscreen it falls back to the projected order on the chart.
   const [ticketPrefill, setTicketPrefill] = useState<(DraftFill & { nonce: number }) | null>(null)
   const clearTicketPrefill = useCallback(() => setTicketPrefill(null), [])
-  const drawSpec = useSymbolSpec(tradeLogin, symbol)
   const { lastVolume } = useLastVolume()
-  const [drawOrder, setDrawOrder] = useState<ChartPlaceReq | null>(null)
+  const [drawOrder, setDrawOrder] = useState<{ req: ChartPlaceReq; symbol: string; decimals: number } | null>(null)
   const [drawOrderBusy, setDrawOrderBusy] = useState(false)
-  const placeDrawOrder = useCallback(async (req: ChartPlaceReq) => {
+  const placeDrawOrder = useCallback(async (job: { req: ChartPlaceReq; symbol: string; decimals: number }) => {
     setDrawOrderBusy(true)
-    const placed = await chartPlace(req)
+    const placed = await chartPlace(job.symbol, job.req)
     setDrawOrderBusy(false)
     setDrawOrder(null)
     if (!placed) return
-    if (placed.status === 'PLACED') showToast(String(t('charts.ticket.pendingPlaced', { price: placed.price != null ? placed.price.toFixed(decimals) : EMPTY })), 'success')
-    else if (placed.status === 'FILLED') showToast(String(t('charts.ticket.filledAt', { price: placed.filledPrice != null ? placed.filledPrice.toFixed(decimals) : EMPTY })), 'success')
+    const dec = job.decimals
+    if (placed.status === 'PLACED') showToast(String(t('charts.ticket.pendingPlaced', { price: placed.price != null ? placed.price.toFixed(dec) : EMPTY })), 'success')
+    else if (placed.status === 'FILLED') showToast(String(t('charts.ticket.filledAt', { price: placed.filledPrice != null ? placed.filledPrice.toFixed(dec) : EMPTY })), 'success')
     else if (placed.status === 'REJECTED' || placed.status === 'FAILED') showToast(placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')), 'error')
     else showToast(String(t(activeAccount?.source === 'gateway' ? 'charts.ticket.acceptedGateway' : 'charts.ticket.accepted')), 'info')
-  }, [chartPlace, showToast, t, decimals, activeAccount?.source])
-  const drawToOrder = useCallback((o: { side: Side; price: number; sl: number; tp: number; volume: number | null }) => {
-    if (isFullscreen) { openDraft(o.side, o.price, o.sl, o.tp); return }
-    const f = exactDigits != null ? Math.pow(10, exactDigits) : null
+  }, [chartPlace, showToast, t, activeAccount?.source])
+  const drawToOrder = useCallback((c: DrawOrderCtx, o: DrawOrderReq) => {
+    if (isFullscreen) { c.openDraft(o.side, o.price, o.sl, o.tp); return }
+    const f = c.exactDigits != null ? Math.pow(10, c.exactDigits) : null
     const r = (v: number) => (f != null ? Math.round(v * f) / f : v)
     if (!tradeLogin) {
       setTicketPrefill({ nonce: Date.now(), side: o.side, price: r(o.price), sl: r(o.sl), tp: r(o.tp) })
       if (isDesktop) { if (pro) updatePro({ widget: 'trade', focus: false }) } else { setTradeSide(o.side); setSheet('trade') }
       return
     }
-    const q = quoteNow()
+    const q = quoteOf(c.symbol)
     const type = draftEntryType(o.side === 'BUY', o.price, q.bid, q.ask)
-    const raw = o.volume != null && o.volume > 0 ? o.volume : parseFloat(defaultVolume(lastVolume, symbol))
+    const raw = o.volume != null && o.volume > 0 ? o.volume : parseFloat(defaultVolume(lastVolume, c.symbol))
     const req: ChartPlaceReq = {
-      side: o.side, volume: clampLots(raw, symbol), login: tradeLogin,
+      side: o.side, volume: clampLots(raw, c.symbol), login: tradeLogin,
       sl: r(o.sl), tp: r(o.tp), type, price: type === 'MARKET' ? null : r(o.price),
     }
-    if (cprefs.trading.oneClick) void placeDrawOrder(req)
-    else setDrawOrder(req)
-  }, [isFullscreen, openDraft, exactDigits, tradeLogin, isDesktop, pro, updatePro, quoteNow, lastVolume, symbol, cprefs.trading.oneClick, placeDrawOrder])
+    const job = { req, symbol: c.symbol, decimals: c.decimals }
+    if (cprefs.trading.oneClick) void placeDrawOrder(job)
+    else setDrawOrder(job)
+  }, [isFullscreen, tradeLogin, isDesktop, pro, updatePro, quoteOf, lastVolume, cprefs.trading.oneClick, placeDrawOrder])
   const drawOrderMsg = (() => {
     if (!drawOrder) return ''
-    const q = quoteNow()
-    const buy = drawOrder.side === 'BUY'
-    const typeText = drawOrder.type === 'MARKET'
+    const { req, symbol: dSym, decimals: dDec } = drawOrder
+    const q = quoteOf(dSym)
+    const buy = req.side === 'BUY'
+    const typeText = req.type === 'MARKET'
       ? String(t(buy ? 'charts.trade.mktBuy' : 'charts.trade.mktSell'))
-      : String(t(`order.pending.type.${drawOrder.side}_${drawOrder.type}`))
-    const px = drawOrder.price ?? (buy ? q.ask : q.bid)
-    const fx = (v: number | null) => (v != null ? v.toFixed(decimals) : EMPTY)
-    return String(t('charts.trade.draftMsg', { type: typeText, symbol, lots: drawOrder.volume.toFixed(lotDecimals(symbol)), price: fx(px), sl: fx(drawOrder.sl), tp: fx(drawOrder.tp) }))
+      : String(t(`order.pending.type.${req.side}_${req.type}`))
+    const px = req.price ?? (buy ? q.ask : q.bid)
+    const fx = (v: number | null) => (v != null ? v.toFixed(dDec) : EMPTY)
+    return String(t('charts.trade.draftMsg', { type: typeText, symbol: dSym, lots: req.volume.toFixed(lotDecimals(dSym)), price: fx(px), sl: fx(req.sl), tp: fx(req.tp) }))
   })()
+
+  // 各格共用的环境 / the environment every cell shares
+  const editInd = useCallback((uid: string) => setEditUid(uid), [])
+  const paneEnv = useMemo<PaneEnv>(() => ({
+    cprefs, candleColors, dirColors, palette, themeName, lang, markerText, isPro, isDesktop, pro,
+    tradeButtons: cprefs.trading.buttons && (isDesktop || pro),
+    showPositions, setShowPositions, showCountdown,
+    scopeLogin, tradeLogin, accountLogin: activeAccount?.login ?? null,
+    balance: activeAccount?.balance ?? null, currency: activeAccount?.accountCurrency ?? '',
+    accountOrders, quotesDown: wsDisconnected, peekQuotes, showToast,
+    place: chartPlace, drawToOrder, openAlert, bumpDraw, onContextMenu: setCtx, onEditInd: editInd,
+    syncBus: multi ? syncBus : null,
+    openCompare: openCompareFor,
+  }), [cprefs, candleColors, dirColors, palette, themeName, lang, markerText, isPro, isDesktop, pro, showPositions, showCountdown,
+    scopeLogin, tradeLogin, activeAccount?.login, activeAccount?.balance, activeAccount?.accountCurrency, accountOrders, wsDisconnected,
+    peekQuotes, showToast, chartPlace, drawToOrder, openAlert, bumpDraw, editInd, multi, syncBus, openCompareFor])
 
   // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
   // The ticket subscribes to its own quotes (per account + the symbol's site-wide one).
   const ticket = (initialSide?: Side) => (
     <OrderTicket
       key={initialSide ?? 'desk'}
-      symbol={symbol}
+      symbol={activeSymbol}
       accounts={accounts}
       refPrice={lastPrice}
       digits={decimals}
@@ -1254,6 +1238,84 @@ export default function ChartsPage() {
     />
   )
 
+  // 只挂在当前格里的页面部件（DOM 顺序与拆分前一致）/ page parts mounted in the active cell only (pre-split DOM order)
+  const extrasTop = (
+    <>
+      {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏。
+          专业版手机从顶栏「更多」进入全屏，这里只留退出。
+          Phone fullscreen toggle; the pro phone layout enters from its top bar's More menu,
+          so here it only exits. */}
+      {(!pro || isFullscreen) && <button
+        type="button"
+        onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+        aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
+        title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
+        className="hit-44 lg:hidden absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-[0.96] motion-reduce:active:scale-100"
+      >
+        {isFullscreen ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 14 10 14 10 20" />
+            <polyline points="20 10 14 10 14 4" />
+            <line x1="14" y1="10" x2="21" y2="3" />
+            <line x1="10" y1="14" x2="3" y2="21" />
+          </svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 3 21 3 21 9" />
+            <polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" />
+            <line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        )}
+      </button>}
+
+      {/* 全屏态时间周期切换：右上角横排 */}
+      {isFullscreen && <IntervalSeg variant="fullscreen" value={activeInterval} onChange={setActiveInterval} codes={cprefs.favIntervals} />}
+    </>
+  )
+  const extrasEnd = (
+    <>
+      {quick != null && (
+        <QuickInput
+          initial={quick}
+          symbols={activeSymbols}
+          onInterval={setActiveInterval}
+          onSymbol={setActiveSymbol}
+          onClose={() => { setQuick(null); focusChart() }}
+        />
+      )}
+
+      {/* 全屏态悬浮画线工具栏（可拖移）*/}
+      {isFullscreen && drawReady && (
+        <FullscreenToolbar
+          toolbarRef={fsToolbarRef}
+          pos={fsToolbarPos}
+          onPointerDown={onFsToolbarPointerDown}
+          onPointerMove={onFsToolbarPointerMove}
+          onPointerUp={onFsToolbarPointerUp}
+          drawLayerRef={drawLayerRef}
+          bumpDraw={bumpDraw}
+          showPositions={showPositions}
+          onTogglePositions={() => setShowPositions((v) => !v)}
+        />
+      )}
+
+      {/* 专业版：顶部灵动岛（断线 / 警报触发）+ 手机画线条（标签栏「画线」开合）
+          Pro: the top island (offline / alert fired) + the phone draw strip (tab bar "Draw") */}
+      {pro && !isFullscreen && (
+        <ProIsland down={wsDisconnected} event={island} digits={digitsFor} onOpen={() => (isDesktop ? updatePro({ widget: 'alerts', focus: false }) : setAlertMgrOpen(true))} onDismiss={dismissIsland} />
+      )}
+      {pro && !isDesktop && !isFullscreen && proDraw && drawReady && (
+        <div className="pt-drawbar no-sb">
+          <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
+        </div>
+      )}
+    </>
+  )
+  const tpl = gridTemplate(maxIdx != null && multi ? '1' : cg.grid)
+  const treeOpen = pro && isDesktop && !proPrefs.focus && proPrefs.widget === 'tree'
+  const dataWin = <LiveDataWindow info={info} timezone={cprefs.timezone} candle={candleColors} />
+
   return (
     <div
       className={`term-shell ${pro ? `pt ${isDesktop ? 'pt-d' : 'pt-m'} ${proPrefs.focus && isDesktop ? 'pt-focus' : ''} ${proPrefs.widget && !(proPrefs.focus && isDesktop) ? 'has-panel' : ''}` : ''}`}
@@ -1264,8 +1326,8 @@ export default function ChartsPage() {
       {pro && !isFullscreen && (
         <ProTopBar
           desktop={isDesktop}
-          symbol={symbol}
-          interval={interval}
+          symbol={activeSymbol}
+          interval={activeInterval}
           digits={decimals}
           dayStats={dayStats}
           fallbackPrice={lastPrice}
@@ -1273,8 +1335,8 @@ export default function ChartsPage() {
           favIntervals={cprefs.favIntervals}
           onInterval={pickIntervalPro}
           onFavIntervals={setFavIntervals}
-          chartType={cprefs.chartType}
-          onChartType={(v) => updatePrefs({ chartType: v })}
+          chartType={activeChartType}
+          onChartType={setActiveChartType}
           onIndicators={() => setSettingsOpen(true)}
           onAlerts={() => (isDesktop ? updatePro({ widget: 'alerts', focus: false }) : setAlertMgrOpen(true))}
           alertCount={activeAlertCount}
@@ -1288,6 +1350,8 @@ export default function ChartsPage() {
           fullscreen={isDesktop ? docFs : isFullscreen}
           onFullscreen={isDesktop ? toggleDocFs : enterFullscreen}
           onLayout={setLayout}
+          layoutMenu={layoutMenu('pro')}
+          tools={<>{compareBtn('pt-icon')}{replayBtn('pt-icon')}</>}
         />
       )}
       {/* 左栏：自选（桌面常驻；手机从报价条的品种名点开抽屉）
@@ -1298,8 +1362,8 @@ export default function ChartsPage() {
           <WatchlistPanel
             className="flex min-h-0 flex-1 flex-col"
             symbols={activeSymbols}
-            active={symbol}
-            onSelect={setSymbol}
+            active={activeSymbol}
+            onSelect={setActiveSymbol}
             digitsFor={digitsFor}
             quotesDown={wsDisconnected}
           />
@@ -1308,11 +1372,10 @@ export default function ChartsPage() {
 
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
-        <LiveBarSync symbol={symbol} interval={interval} engine={engine} liveBidRef={liveBidRef} dataKeyRef={dataKeyRef} />
         {!isFullscreen && !pro && (
           <LiveSymbolHeader
-            symbol={symbol}
-            interval={interval}
+            symbol={activeSymbol}
+            interval={activeInterval}
             digits={decimals}
             dayStats={dayStats}
             fallbackPrice={lastPrice}
@@ -1328,9 +1391,10 @@ export default function ChartsPage() {
               Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
               holds the column before the engine is ready so the grid doesn't jump. */}
           {/* 经典版与专业版同一条 TradingView 式画线栏（2026-11-26 起；以前经典版是带颜色圆点的
-              DrawToolsRow 竖轨，颜色现在都在选中画线的浮动工具条里改）。
+              DrawToolsRow 竖轨，颜色现在都在选中画线的浮动工具条里改）。多图时作用在当前格。
               Classic and pro share the TradingView-style draw bar since 2026-11-26 (classic
-              used to have DrawToolsRow's rail with colour dots; colour lives in the floating bar). */}
+              used to have DrawToolsRow's rail with colour dots; colour lives in the floating bar).
+              With several charts it acts on the active cell. */}
           {!isFullscreen && (!pro || (isDesktop && !proPrefs.focus)) && (drawReady
             ? (
               <ProDrawRail
@@ -1341,7 +1405,7 @@ export default function ChartsPage() {
                 onMeasure={() => { setZoomOn(false); setMeasureOn((v) => !v) }}
                 zoomOn={zoomOn}
                 onZoom={() => { setMeasureOn(false); setZoomOn((v) => !v) }}
-                canZoomOut={zoomStack.length > 0}
+                canZoomOut={info.canZoomOut}
                 onZoomOut={zoomOut}
                 indCount={shownList.length}
                 indHidden={indAllHidden}
@@ -1357,10 +1421,20 @@ export default function ChartsPage() {
               Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
           {!isFullscreen && !pro && (
             <div className="term-tb" ref={tbRef}>
-              <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
-              <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
+              <IntervalSeg value={activeInterval} onChange={setActiveInterval} codes={cprefs.favIntervals} />
+              <IntervalMenu value={activeInterval} onChange={setActiveInterval} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
               <span className="term-toolbar-divider" aria-hidden />
-              <ChartTypeMenu value={cprefs.chartType} onChange={(v) => updatePrefs({ chartType: v })} />
+              <ChartTypeMenu value={activeChartType} onChange={setActiveChartType} />
+              {/* 多图布局（≥768px）/ multi-chart layout (≥768px) */}
+              {canMulti && <>
+                <span className="term-toolbar-divider" aria-hidden />
+                {layoutMenu('classic')}
+              </>}
+              {/* 对比 / 回放（桌面；手机在报价条第二行）/ compare / replay (desktop; phones use the quote strip's second row) */}
+              {isDesktop && <>
+                {compareBtn('term-tool-btn')}
+                {replayBtn('term-tool-btn')}
+              </>}
               <div className="term-tbr">
                 <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => { setSheetDockTab('positions'); setSheet('positions') }}>
                   {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
@@ -1390,216 +1464,51 @@ export default function ChartsPage() {
             </div>
           )}
 
-          {/* 图表容器：无缝，填满网格剩余高度。/ Chart container: seamless, fills the grid. */}
-          {/* tabIndex 让图表本身能拿到焦点：点一下图表焦点就落到这里，图表快捷键（画线的
-              Alt+字母、Delete，快速输入的数字 / 字母，见 useChartHotkeys）只在焦点处于图表区时
-              生效；键盘用户也能 Tab 到图表再用这些键。role="group" 加名字，读屏进来时报「行情图表，分组」。
-              tabIndex makes the chart itself focusable: a click on the chart lands focus
-              here, and the chart shortcuts (DrawLayer's Alt+letter and Delete, quick input's
-              digits / letters, see useChartHotkeys) only act while focus is in the chart
-              area; keyboard users can Tab to the chart and use them too.
-              role="group" with a name, so a screen reader says "Charts, group" on entry. */}
+          {/* 图表网格：单图时只有第 0 格，外观与拆分前一样；多图时 2–4 格，当前格描一圈淡紫。
+              每格的 tabIndex / role / 浮层见 ChartPane。第 0 格的 key 永远是 0，换外壳、换网格都不重建。
+              The chart grid: a single chart mounts only cell 0 and looks as before the split; a
+              multi-chart grid mounts 2–4 cells with a faint violet ring on the active one. Each
+              cell's tabIndex / role / overlays live in ChartPane. Cell 0's key is always 0, so shell
+              or grid switches never rebuild it. */}
           <div
-            ref={chartBoxRef}
-            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'} ${showTradeBtns ? 'has-tbtns' : ''} ${maxPane && maxPane !== 'main' && indLayout.panes.some((p) => p.id === maxPane) ? 'main-min' : ''}`}
-            data-ctheme={themeName}
-            tabIndex={0}
-            role="group"
-            aria-label={t('nav.charts')}
-            onContextMenu={onChartContextMenu}
+            className={`term-grid${multi ? ' multi' : ''}`}
+            data-grid={multi ? (maxIdx != null ? 'max' : cg.grid) : undefined}
+            style={multi ? { gridTemplateColumns: tpl.cols, gridTemplateRows: tpl.rows } : undefined}
           >
-            {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏。
-                专业版手机从顶栏「更多」进入全屏，这里只留退出。
-                Phone fullscreen toggle; the pro phone layout enters from its top bar's More menu,
-                so here it only exits. */}
-            {(!pro || isFullscreen) && <button
-              type="button"
-              onClick={isFullscreen ? exitFullscreen : enterFullscreen}
-              aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-              title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-              className="hit-44 lg:hidden absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-[0.96] motion-reduce:active:scale-100"
-            >
-              {isFullscreen ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 14 10 14 10 20" />
-                  <polyline points="20 10 14 10 14 4" />
-                  <line x1="14" y1="10" x2="21" y2="3" />
-                  <line x1="10" y1="14" x2="3" y2="21" />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="15 3 21 3 21 9" />
-                  <polyline points="9 21 3 21 3 15" />
-                  <line x1="21" y1="3" x2="14" y2="10" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              )}
-            </button>}
-
-            {/* 全屏态时间周期切换：右上角横排 */}
-            {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />}
-
-            <div ref={containerRef} className="h-full w-full" />
-            {/* 持仓标记层：入场价/止损/止盈线 + 拖动改单。刻意排在画图层之前——两层
-                都用「悬停到自己的目标才抢指针事件」的策略，DOM 上后者在上，于是画线
-                操作天然优先于拖止损线，不会互相抢。/ Position markers: entry/SL/TP
-                lines + drag-to-modify. Deliberately mounted before the draw layer:
-                both only capture pointer events while hovering their own targets, and
-                being later in the DOM puts the draw layer on top, so drawing
-                naturally takes precedence over dragging an SL line. */}
-            {drawReady && chartRef.current && seriesRef.current && (
-              <LiveOverlay
-                chart={chartRef.current}
-                series={seriesRef.current}
-                scopeLogin={scopeLogin}
-                symbol={symbol}
-                digits={decimals}
-                exactDigits={exactDigits}
-                refPrice={lastPrice}
-                visible={showPositions}
-                onToast={showToast}
-                trading={cprefs.trading}
-                balance={activeAccount?.balance ?? null}
-                currency={activeAccount?.accountCurrency ?? ''}
-                login={tradeLogin}
-                quote={quoteNow}
-                onPlace={chartPlace}
-                draftRequest={draftReq}
+            {mounted.map((i) => (
+              <ChartPane
+                key={i}
+                ref={paneRefs[i]}
+                idx={i}
+                env={paneEnv}
+                symbol={paneSym(i)}
+                interval={paneIv(i)}
+                chartType={paneType(i)}
+                ind={paneIndList[i] ?? indLayout}
+                updateInd={paneIndUpdaters[i]}
+                onInterval={paneIntervalSetters[i]}
+                active={i === activeIdx}
+                multi={multi}
+                hidden={!shown.includes(i)}
+                area={multi ? cellArea(cg.grid, i) : undefined}
+                maximised={multi && maxIdx === i}
+                fullscreen={isFullscreen && i === activeIdx}
+                measureOn={measureOn && i === activeIdx}
+                zoomOn={zoomOn && i === activeIdx}
+                onMeasureDone={doneMeasure}
+                onZoomEnd={endZoom}
+                onActivate={setActivePane}
+                onToggleMax={toggleMax}
+                onInfo={onPaneInfo}
+                extrasTop={i === activeIdx ? extrasTop : undefined}
+                extrasEnd={i === activeIdx ? extrasEnd : undefined}
+                compare={cg.panes[i]?.compare}
+                onCompareChange={onCompareChange}
+                treeHost={i === activeIdx && treeOpen ? treeHost : null}
               />
-            )}
-            {drawReady && chartRef.current && seriesRef.current && cprefs.trading.executions && !priceBased && (
-              <LiveExecutions
-                chart={chartRef.current}
-                series={seriesRef.current}
-                scopeLogin={scopeLogin}
-                symbol={symbol}
-                login={activeAccount?.login ?? null}
-                orders={accountOrders}
-                barTimes={getBarTimes}
-                dataKey={`${interval}|${hasData}|${lastPrice}`}
-                visible={showPositions}
-              />
-            )}
-            {drawReady && chartRef.current && seriesRef.current && isDesktop && (
-              <PlusOrderButton chart={chartRef.current} series={seriesRef.current} digits={decimals} quote={quoteNow}
-                onPick={showPositions && tradeLogin ? openDraft : null} onAlert={(price) => openAlert({ price })} />
-            )}
-            {showCountdown && !priceBased && hasData && drawReady && chartRef.current && seriesRef.current && (
-              <BarCountdown
-                chart={chartRef.current}
-                series={seriesRef.current}
-                interval={interval}
-                candlesRef={engine.candlesRef}
-                colors={dirColors}
-                stale={stale}
-              />
-            )}
-            {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
-              <DrawLayer
-                ref={drawLayerRef}
-                chart={chartRef.current}
-                series={seriesRef.current}
-                host={containerRef.current}
-                symbol={symbol}
-                barTimes={getBarTimes}
-                digits={decimals}
-                interval={interval}
-                fmtTime={drawFmtTime}
-                theme={drawTheme}
-                onStateChange={bumpDraw}
-                onToOrder={drawToOrder}
-                spec={drawSpec}
-                onAlert={(d) => openAlert({ drawing: d })}
-              />
-            )}
-            {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
-
-            {/* 主图状态行：品种 · 周期 · OHLC · 涨跌 / main status line */}
-            <ChartLegend store={engine.ohlcStore} symbol={symbol} interval={interval} chartType={cprefs.chartType} decimals={decimals} legend={cprefs.legend} colors={dirColors} />
-            {/* 买卖按钮（桌面，或手机全屏横屏时）/ buy & sell buttons (desktop, or phone fullscreen) */}
-            {showTradeBtns && (
-              <TradeButtons symbol={symbol} digits={decimals} login={tradeLogin} oneClick={cprefs.trading.oneClick} touch={!isDesktop} onPlace={chartPlace} quotesDown={wsDisconnected} />
-            )}
-            {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
-            <PaneLegends layout={indLayout} list={shownList} boxes={paneBoxes} legendStore={legendStore} digits={decimals} candle={candleColors}
-              axisW={chartRef.current ? chartRef.current.priceScale('right').width() : 56} maxPane={maxPane} actions={legendActions} showRows={cprefs.legend.indicators} />
-
-            {drawReady && chartRef.current && seriesRef.current && (
-              <ChartPriceLines
-                chart={chartRef.current}
-                series={seriesRef.current}
-                symbol={symbol}
-                interval={interval}
-                candlesRef={engine.candlesRef}
-                palette={palette}
-                bidAsk={cprefs.lines.bidAsk}
-                highLow={cprefs.lines.highLow}
-                prevClose={cprefs.lines.prevClose && !priceBased}
-                labels={{ bid: String(t('charts.lines.bid')), ask: String(t('charts.lines.ask')), high: String(t('charts.lines.high')), low: String(t('charts.lines.low')), prev: String(t('charts.lines.prev')) }}
-              />
-            )}
-            {drawReady && chartRef.current && seriesRef.current && (
-              <AlertLines
-                chart={chartRef.current}
-                series={seriesRef.current}
-                symbol={symbol}
-                digits={decimals}
-                bid={alertBid}
-                label={String(t('charts.alert.lineTitle'))}
-                dragTip={String(t('charts.alert.dragTip'))}
-                onEdit={(a) => openAlert({ edit: a })}
-                onError={(m) => showToast(m ? localizeApiError(m) : String(t('charts.alert.err.save')), 'error')}
-              />
-            )}
-            {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
-              <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={dirColors} />
-            )}
-            {/* 触屏拖动画线点 / 止盈止损线时的放大镜 / loupe while touch-dragging drawing points and SL/TP lines */}
+            ))}
+            {/* 触屏拖动画线点 / 止盈止损线时的放大镜（全局只挂一个）/ the touch-drag loupe (one for the page) */}
             {drawReady && <ChartLoupe />}
-            {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
-            {zoomOn && drawReady && (
-              <ProZoomBox
-                chartRef={chartRef}
-                hostRef={containerRef}
-                onZoom={(prev) => { setZoomStack((st) => [...st, prev]); setZoomOn(false) }}
-                onCancel={() => setZoomOn(false)}
-              />
-            )}
-            {quick != null && (
-              <QuickInput
-                initial={quick}
-                symbols={activeSymbols}
-                onInterval={setIntervalCode}
-                onSymbol={setSymbol}
-                onClose={() => { setQuick(null); focusChart() }}
-              />
-            )}
-
-            {/* 全屏态悬浮画线工具栏（可拖移）*/}
-            {isFullscreen && drawReady && (
-              <FullscreenToolbar
-                toolbarRef={fsToolbarRef}
-                pos={fsToolbarPos}
-                onPointerDown={onFsToolbarPointerDown}
-                onPointerMove={onFsToolbarPointerMove}
-                onPointerUp={onFsToolbarPointerUp}
-                drawLayerRef={drawLayerRef}
-                bumpDraw={bumpDraw}
-                showPositions={showPositions}
-                onTogglePositions={() => setShowPositions((v) => !v)}
-              />
-            )}
-
-            {/* 专业版：顶部灵动岛（断线 / 警报触发）+ 手机画线条（标签栏「画线」开合）
-                Pro: the top island (offline / alert fired) + the phone draw strip (tab bar "Draw") */}
-            {pro && !isFullscreen && (
-              <ProIsland down={wsDisconnected} event={island} digits={digitsFor} onOpen={() => (isDesktop ? updatePro({ widget: 'alerts', focus: false }) : setAlertMgrOpen(true))} onDismiss={dismissIsland} />
-            )}
-            {pro && !isDesktop && !isFullscreen && proDraw && drawReady && (
-              <div className="pt-drawbar no-sb">
-                <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
-              </div>
-            )}
           </div>
 
           {isDesktop && !isFullscreen && (
@@ -1611,7 +1520,7 @@ export default function ChartsPage() {
               onAutoScale={autoScale}
               onRange={applyRange}
               onGoToDate={() => setGotoOpen(true)}
-              busy={rangeBusy}
+              busy={info.rangeBusy}
             />
           )}
         </div>
@@ -1647,7 +1556,7 @@ export default function ChartsPage() {
         )}
         {alertMgrOpen && (
           <AlertManager
-            symbol={symbol}
+            symbol={activeSymbol}
             bid={alertBid}
             onNew={() => openAlert({ price: quoteNow().bid ?? undefined })}
             onEdit={(a, clone) => openAlert({ edit: a, clone })}
@@ -1659,9 +1568,9 @@ export default function ChartsPage() {
         {alertInit && (
           <AlertDialog
             init={alertInit}
-            symbol={symbol}
+            symbol={activeSymbol}
             digits={decimals}
-            chartInterval={interval}
+            chartInterval={activeInterval}
             indicators={shownList}
             drawings={drawLayerRef.current?.getDrawings() ?? []}
             bid={alertBid}
@@ -1687,7 +1596,7 @@ export default function ChartsPage() {
               setScaleMode,
               invert: cprefs.invertScale,
               setInvert: (v) => updatePrefs({ invertScale: v }),
-              orderAt: tradeLogin ? openDraft : null,
+              orderAt: tradeLogin ? (side, price) => act()?.openDraft(side, price) : null,
               alertAt: (price) => openAlert({ price }),
               orderLabel: (side, price) => {
                 const q = quoteNow()
@@ -1713,7 +1622,7 @@ export default function ChartsPage() {
         {/* 手机端底部交易条：卖 | 点差 | 买，点开下单票抽屉
             Mobile trade bar: sell | spread | buy, opens the ticket sheet */}
         {!isDesktop && !isFullscreen && !pro && (
-          <MobileTradeBar symbol={symbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} quotesDown={wsDisconnected} />
+          <MobileTradeBar symbol={activeSymbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} quotesDown={wsDisconnected} />
         )}
         {pro && !isDesktop && !isFullscreen && (
           <ProTabBar active={proTab} onTab={onProTab} posBadge={<PositionsBadge scopeLogin={scopeLogin} className="pt-tab-badge" />} />
@@ -1727,12 +1636,14 @@ export default function ChartsPage() {
           onWidget={(w) => updatePro({ widget: w, focus: false })}
           width={proPrefs.panelW}
           onWidth={(px) => updatePro({ panelW: px })}
-          watch={<ProWatchlist symbols={activeSymbols} active={symbol} onSelect={pickSymbolPro} digitsFor={digitsFor} quotesDown={wsDisconnected} />}
-          details={<ProDetails symbol={symbol} digits={decimals} dayStats={dayStats} fallback={lastPrice} stale={stale} down={wsDisconnected} />}
+          watch={<ProWatchlist symbols={activeSymbols} active={activeSymbol} onSelect={pickSymbolPro} digitsFor={digitsFor} quotesDown={wsDisconnected} />}
+          details={<ProDetails symbol={activeSymbol} digits={decimals} dayStats={dayStats} fallback={lastPrice} stale={stale} down={wsDisconnected} timezone={cprefs.timezone} />}
+          data={dataWin}
+          tree={<div ref={setTreeHost} className="pt-tree-host" />}
           trade={<>{ticket()}<AccountSummary account={activeAccount} /></>}
           alerts={(
             <ProAlerts
-              symbol={symbol}
+              symbol={activeSymbol}
               bid={alertBid}
               onNew={() => openAlert({ price: quoteNow().bid ?? undefined })}
               onEdit={(a) => openAlert({ edit: a })}
@@ -1754,7 +1665,7 @@ export default function ChartsPage() {
           remaining height and scrolls internally; the strip stays pinned at the bottom. */}
       {isDesktop && !pro && (
         <aside className="term-col term-col-right">
-          <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{symbol || EMPTY}</span></div>
+          <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{activeSymbol || EMPTY}</span></div>
           {ticket()}
           <AccountSummary account={activeAccount} />
         </aside>
@@ -1778,8 +1689,8 @@ export default function ChartsPage() {
                 the sheet offers no other visible way out, and tapping the scrim isn't obvious. */}
             <div className="term-ph term-sheet-ph">
               <div className="term-sheet-ttl">
-                <h3 id={termSheetTitleId}>{shownSheet === 'watchlist' ? t('charts.watchlist.title') : shownSheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
-                <span>{shownSheet === 'watchlist' ? activeSymbols.length : shownSheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : <PositionsCount scopeLogin={scopeLogin} />}</span>
+                <h3 id={termSheetTitleId}>{shownSheet === 'watchlist' ? t('charts.watchlist.title') : shownSheet === 'trade' ? t('charts.sheetTicket') : shownSheet === 'data' ? t('charts.pro.w.data') : t('charts.openPositions')}</h3>
+                <span>{shownSheet === 'watchlist' ? activeSymbols.length : shownSheet === 'trade' ? `${activeSymbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : shownSheet === 'data' ? activeSymbol : <PositionsCount scopeLogin={scopeLogin} />}</span>
               </div>
               {/* 「下单后自动打开」就放在它自己弹出来的这张抽屉的抬头里：嫌它烦的人
                   正好在这儿，不用去设置页里找一个自己都不知道叫什么的开关。
@@ -1803,12 +1714,13 @@ export default function ChartsPage() {
                 <ProWatchlist
                   mobile
                   symbols={activeSymbols}
-                  active={symbol}
+                  active={activeSymbol}
                   onSelect={pickFromSheet}
                   digitsFor={digitsFor}
                   quotesDown={wsDisconnected}
                 />
               )}
+              {shownSheet === 'data' && dataWin}
               {shownSheet === 'trade' && (
                 <>
                   {ticket(tradeSide)}
@@ -1827,8 +1739,8 @@ export default function ChartsPage() {
       {indDialog.shown && (
         <IndicatorDialog
           closing={indDialog.closing}
-          layout={indLayout}
-          update={updateInd}
+          layout={activeInd}
+          update={updateActiveInd}
           isPro={isPro}
           onAdd={addIndicator}
           onClose={() => setSettingsOpen(false)}
@@ -1839,13 +1751,23 @@ export default function ChartsPage() {
         <IndicatorEditor
           uid={indEditor.shown}
           closing={indEditor.closing}
-          layout={indLayout}
-          interval={interval}
+          layout={activeInd}
+          interval={activeInterval}
           candle={candleColors}
           symbols={activeSymbols}
-          onChange={(next) => updateInd((l) => updateInstance(l, next.uid, () => next))}
-          onSaveDefault={(i) => updateInd((l) => ({ ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } }))}
+          onChange={(next) => updateActiveInd((l) => updateInstance(l, next.uid, () => next))}
+          onSaveDefault={(i) => updateActiveInd((l) => ({ ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } }))}
           onClose={() => setEditUid(null)}
+        />
+      )}
+
+      {cmpIdx != null && (
+        <CompareDialog
+          symbols={activeSymbols}
+          mainSymbol={paneSym(cmpIdx)}
+          entries={cg.panes[cmpIdx]?.compare ?? []}
+          onChange={(next) => onCompareChange(cmpIdx, next)}
+          onClose={() => { setCmpIdx(null); focusChart() }}
         />
       )}
 
@@ -1855,8 +1777,8 @@ export default function ChartsPage() {
           mode={cmd ?? 'all'}
           onClose={closeCmd}
           symbols={activeSymbols}
-          activeSymbol={symbol}
-          interval={interval}
+          activeSymbol={activeSymbol}
+          interval={activeInterval}
           onSymbol={pickSymbolPro}
           onInterval={pickIntervalPro}
           onIndicator={addIndicatorPro}
@@ -1871,6 +1793,7 @@ export default function ChartsPage() {
     </div>
   )
 }
+
 
 // 手机端底部交易条：卖 | 点差 | 买。自己订阅当前品种的报价，跳价只重画这一条。
 // Mobile trade bar: sell | spread | buy. Subscribes to the active symbol's quote itself,

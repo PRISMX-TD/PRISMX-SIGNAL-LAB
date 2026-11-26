@@ -54,6 +54,10 @@ interface Props {
   fullscreen: boolean
   onFullscreen: () => void
   onLayout: (l: ProLayout) => void
+  // 多图布局按钮（≥768px 才有；阶段 6）/ the multi-chart layout button (≥768px only; phase 6)
+  layoutMenu?: React.ReactNode
+  // 对比 / 回放按钮（当前格，阶段 6）/ compare / replay buttons (the active cell, phase 6)
+  tools?: React.ReactNode
 }
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -91,6 +95,8 @@ export default function ProTopBar(p: Props) {
       <IntervalMenu value={p.interval} onChange={p.onInterval} favorites={p.favIntervals} onFavorites={p.onFavIntervals} />
       <span className="pt-sep" aria-hidden />
       <ChartTypeMenu value={p.chartType} onChange={p.onChartType} />
+      {p.layoutMenu}
+      {p.tools}
       <span className="pt-sep" aria-hidden />
       <button type="button" className="pt-btn" onClick={p.onIndicators}>
         <IcFx size={16} /><span>{tt('charts.indicators.short')}</span>
@@ -165,6 +171,8 @@ function MobileBar(p: Props & { ivOptions: { value: string; label: string }[] })
         </div>
         <IntervalMenu value={p.interval} onChange={p.onInterval} favorites={p.favIntervals} onFavorites={p.onFavIntervals} />
         <ChartTypeMenu value={p.chartType} onChange={p.onChartType} />
+        {p.layoutMenu}
+        {p.tools}
         <button type="button" className="pt-icon" onClick={p.onIndicators} aria-label={tt('charts.indicators.button')}><IcFx size={17} /></button>
       </div>
     </header>

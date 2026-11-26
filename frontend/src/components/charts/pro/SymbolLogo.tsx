@@ -268,6 +268,18 @@ function art(sym: string, uid: string): ReactNode {
   return <Letter text={(c[0] || '?')} bg="#4a4a55" />
 }
 
+/** 单个货币的圆形国旗（图上财经事件的提示卡用）；没有国旗的货币画首字母圆。
+ *  One currency's round flag (the chart's econ-event card); currencies without a flag get a letter disc. */
+export const CurrencyFlag = memo(function CurrencyFlag({ currency, size = 16, className }: { currency: string; size?: number; className?: string }) {
+  const uid = 'cf' + useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const flag = CCY_FLAG[currency.toUpperCase()]
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 20 20" aria-hidden focusable="false">
+      {flag ? <RoundFlag id={uid} flag={flag} /> : <Letter text={(currency[0] || '?').toUpperCase()} bg="#4a4a55" />}
+    </svg>
+  )
+})
+
 export default memo(function SymbolLogo({ symbol, size = 20, className }: { symbol: string; size?: number; className?: string }) {
   // useId 带冒号，放进 url(#…) 前去掉 / useId contains colons; strip them for url(#…)
   const uid = 'sl' + useId().replace(/[^a-zA-Z0-9_-]/g, '')

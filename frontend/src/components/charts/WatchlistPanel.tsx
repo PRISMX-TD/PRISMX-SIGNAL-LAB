@@ -1,15 +1,19 @@
 // 交易终端：自选品种列表（左栏 / 手机抽屉）/ Trading terminal: watchlist.
 //
 // 品种来自 EA 正在推送的活跃列表（useLive().activeSymbols），实时价来自全站
-// 统一报价。前端没有各品种的"当日开盘价"，所以这里不算
-// 当日涨跌幅：价格按最近一次报价跳动方向上色（涨绿跌红），旁边一条迷你走势
+// 统一报价。价格按最近一次报价跳动方向上色（涨绿跌红）；价格下面一行是日内涨跌幅：
+// 现价对前一交易日收盘（后端 /chart/day-refs 给每个品种的券商日开盘与前收，useDayChange
+// 每 60 秒共享轮询一次；没有前收就对今开），红绿跟图表设置的涨跌提示色。旁边一条迷你走势
 // 画的是**页面打开后收到的报价序列**——真实数据，只是窗口短；没收到两笔以上
 // 之前空着，不编。点击整行切换主图品种。
 // Symbols come from the EA's active list; live prices from the site-wide quote
-// feed. There is no per-symbol day-open on the frontend, so no day change%:
-// the price is colored by its last tick direction and the sparkline plots the
-// ticks received since the page opened (real data, short window; blank until
-// there are at least two). Clicking a row switches the chart symbol.
+// feed. The price is coloured by its last tick direction; under it sits the day
+// change %: live bid vs the previous close (the backend's /chart/day-refs gives each
+// symbol's broker-day open and previous close, polled once per 60 s by the shared
+// useDayChange; today's open when there's no previous close), tinted with the chart's
+// up/down cue colours. The sparkline plots the ticks received since the page opened
+// (real data, short window; blank until there are at least two). Clicking a row
+// switches the chart symbol.
 //
 // 渲染范围（2026-11-15）：面板本身不随报价重渲染。跳价簿（watchTicks.ts）跟着全站
 // 报价 store 走，每一行（WatchRow）只订阅自己那个品种在簿里的那一格：一帧报价只
@@ -28,6 +32,8 @@ import SymbolLogo from './pro/SymbolLogo'
 import { FavoriteStar, SymbolTabBar, useSymbolTabs } from '../signals/SymbolTabs'
 import { createWatchTicks, type Dir, type WatchTicks } from './watchTicks'
 import { EMPTY } from '../../utils/format'
+import type { ChartDayRef } from '../../api/types'
+import { calcDayChange, fmtPct, useDayRefs, useDirColors } from './useDayChange'
 
 interface Props {
   symbols: string[]
@@ -65,6 +71,8 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, q
   // 分类标签 + 自选（见 SymbolTabs）；搜索时不看标签，在全部品种里找。
   // Category tabs + favorites (see SymbolTabs); a search ignores the tab and looks through all symbols.
   const { tabs, tab, setTab, visible, favEnabled, favSet, toggleFavorite } = useSymbolTabs(symbols, 'watchlistTab')
+  const dayRefs = useDayRefs()
+  const dirColors = useDirColors()
 
   const filtered = query.trim()
     ? symbols.filter((s) => s.toUpperCase().includes(query.trim().toUpperCase()))
@@ -104,6 +112,8 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, q
               active={sym === active}
               favEnabled={favEnabled}
               fav={favSet.has(sym)}
+              dayRef={dayRefs[sym]}
+              colors={dirColors}
               onSelect={onSelect}
               onToggleFav={toggleFavorite}
             />
@@ -128,13 +138,15 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, q
 // code whose ::after covers the row (.term-wr-pick in terminal.css), and the star is a
 // separate button beside it. The row used to have the option role, whose children are
 // presentational to screen readers, so the star button effectively did not exist.
-const WatchRow = memo(function WatchRow({ sym, ticks, digits, active, favEnabled, fav, onSelect, onToggleFav }: {
+const WatchRow = memo(function WatchRow({ sym, ticks, digits, active, favEnabled, fav, dayRef, colors, onSelect, onToggleFav }: {
   sym: string
   ticks: WatchTicks
   digits: number
   active: boolean
   favEnabled: boolean
   fav: boolean
+  dayRef: ChartDayRef | undefined
+  colors: { up: string; down: string }
   onSelect: (symbol: string) => void
   onToggleFav: (symbol: string) => void
 }) {
@@ -142,6 +154,7 @@ const WatchRow = memo(function WatchRow({ sym, ticks, digits, active, favEnabled
   const subscribe = useCallback((cb: () => void) => ticks.subscribe(sym, cb), [ticks, sym])
   const get = useCallback(() => ticks.get(sym), [ticks, sym])
   const { bid, dir, hist } = useSyncExternalStore(subscribe, get, get)
+  const chg = calcDayChange(bid, dayRef)
   return (
     <li className={`term-wr ${favEnabled ? 'has-fav' : ''} ${active ? 'on' : ''}`}>
       <SymbolLogo symbol={sym} size={24} className="sym-ava" />
@@ -157,7 +170,12 @@ const WatchRow = memo(function WatchRow({ sym, ticks, digits, active, favEnabled
         <span className="term-wr-nm block">{t(`signals.symbolNames.${sym}`, { defaultValue: displaySymbol(sym) })}</span>
       </span>
       <Spark points={hist} dir={dir} />
-      <span className={`term-wr-px ${dir ?? ''}`}>{bid == null ? EMPTY : bid.toFixed(digits)}</span>
+      <span className="term-wr-pxw">
+        <span className={`term-wr-px ${dir ?? ''}`}>{bid == null ? EMPTY : bid.toFixed(digits)}</span>
+        <span className="term-wr-chg" style={chg && Math.abs(chg.pct) >= 0.005 ? { color: chg.pct > 0 ? colors.up : colors.down } : undefined}>
+          {chg ? fmtPct(chg.pct) : EMPTY}
+        </span>
+      </span>
       {favEnabled && <FavoriteStar on={fav} onToggle={() => onToggleFav(sym)} symbol={sym} />}
     </li>
   )

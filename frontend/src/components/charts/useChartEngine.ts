@@ -115,6 +115,16 @@ export type PaneBoxes = Record<string, { top: number; height: number }>
 // 用户拖窗格分隔条后回报新高度（像素）/ reported after the user drags a pane separator (px)
 export type PaneResize = (mainPx: number, panes: Record<string, number>) => void
 
+// 阶段 6：排在指标窗格后面的「尾部窗格」（对比品种的 pane 模式）。引擎重建指标时先 detach、建完指标再
+// attach(第一个空闲窗格下标)；attach 返回它占用的窗格 id（按顺序，一个 id 一个窗格）。
+// Phase 6: "tail panes" placed after the indicator panes (compare symbols in pane mode). On an
+// indicator rebuild the engine calls detach first and attach(first free pane index) after the
+// indicators; attach returns the pane ids it occupies, in order, one pane per id.
+export interface TailPaneHost {
+  attach: (firstPane: number) => string[]
+  detach: () => void
+}
+
 const DASH: Record<LineDash, LineStyle> = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted }
 const COLLAPSED_PX = 28
 
@@ -205,6 +215,20 @@ export function useChartEngine(
   viewRef.current = view
   const onPaneResizeRef = useRef(onPaneResize)
   onPaneResizeRef.current = onPaneResize
+
+  // ──── 阶段 6：对比品种用的挂钩 / phase-6 hooks for compare symbols ────
+  // 价格轴模式临时覆盖（有百分比对比时切到百分比；null = 用设置里的）/ temporary scale-mode override (null = the user's setting)
+  const scaleOverrideRef = useRef<ScaleMode | null>(null)
+  // 左侧价格轴：指标占用 / 对比品种认领 / left price scale: used by indicators / claimed by compare
+  const indLeftRef = useRef(false)
+  const leftClaimRef = useRef(false)
+  // 尾部窗格 / tail panes
+  const syncAtRef = useRef<((logical: number | null) => void) | null>(null)
+  const syncLegendAt = useCallback((logical: number | null) => { syncAtRef.current?.(logical) }, [])
+  const tailHostRef = useRef<TailPaneHost | null>(null)
+  const tailIdsRef = useRef<string[]>([])
+  const tailWeightRef = useRef<Map<string, number>>(new Map())
+  const indPaneCountRef = useRef(0)
 
   // ──── 主图数据 / main-series data ────
   // 变换后的显示数据缓存（平均 K 线要靠上一根算下一根，增量更新用）。
@@ -583,6 +607,7 @@ export function useChartEngine(
     const m = box(0)
     if (m) boxes.main = m
     used.forEach((p, i) => { const b = box(i + 1); if (b) boxes[p.id] = b })
+    tailIdsRef.current.forEach((id, j) => { const b = box(used.length + 1 + j); if (b) boxes[id] = b })
     setPaneBoxes((prev) => (JSON.stringify(prev) === JSON.stringify(boxes) ? prev : boxes))
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
   }, [])
@@ -595,15 +620,18 @@ export function useChartEngine(
     const total = host.clientHeight
     const iv = indRef.current
     const used = usedPanes(iv.list.filter((i) => instRef.current.has(i.uid)), iv.panes)
-    if (panes.length <= 1 || total <= 0 || used.length === 0) {
+    const tail = tailIdsRef.current
+    if (panes.length <= 1 || total <= 0 || (used.length === 0 && tail.length === 0)) {
       appliedRef.current = null
       requestAnimationFrame(measurePanes)
       return
     }
     const max = iv.maxPane && (iv.maxPane === 'main' || used.some((p) => p.id === iv.maxPane)) ? iv.maxPane : null
     const collapsed = (id: string) => (max ? id !== max : id !== 'main' && !!used.find((p) => p.id === id)?.collapsed)
-    const ids = ['main', ...used.map((p) => p.id)]
-    const weight = (id: string) => (id === 'main' ? iv.mainH : used.find((p) => p.id === id)?.h ?? 1)
+    // 尾部窗格（对比品种）排在指标窗格后面，权重默认 1，拖过分隔条后记住（不持久化）
+    // Tail panes (compare) follow the indicator panes; weight 1 by default, remembered after a drag (not persisted)
+    const ids = ['main', ...used.map((p) => p.id), ...tail]
+    const weight = (id: string) => (id === 'main' ? iv.mainH : used.find((p) => p.id === id)?.h ?? tailWeightRef.current.get(id) ?? 1)
     const fixed = ids.filter(collapsed).length * COLLAPSED_PX
     const flex = ids.filter((id) => !collapsed(id))
     const wsum = flex.reduce((a, id) => a + weight(id), 0) || 1
@@ -697,6 +725,33 @@ export function useChartEngine(
       }
     }
     chart.subscribeCrosshairMove(onCrosshairMove)
+    // 多图同步：别的格子用 setCrosshairPosition 把十字线放到这张图上时图表库不发 crosshairMove，
+    // 状态行 / 指标图例要靠这里按逻辑下标补一次（null = 十字线离开）。
+    // Multi-chart sync: setCrosshairPosition (driven from another cell) fires no crosshairMove, so the
+    // status line / indicator legends are filled here by logical index (null = the crosshair left).
+    syncAtRef.current = (logical) => {
+      if (logical == null) {
+        hoveringRef.current = false
+        legendStore.set(latestLegendRef.current)
+        publishOhlc(shownRef.current)
+        return
+      }
+      const bar = series.dataByIndex(logical) as MainBar | null
+      if (!bar || bar.close === undefined) return
+      hoveringRef.current = true
+      const next: LegendValues = {}
+      instRef.current.forEach((h) => {
+        const row: Record<string, number | null> = {}
+        for (const pl of h.plots) {
+          const d = pl.api.dataByIndex(logical) as { value?: number; time?: unknown } | null
+          row[pl.key] = d && d.time === bar.time ? d.value ?? null : null
+        }
+        next[h.uid] = row
+      })
+      legendStore.set(next)
+      const prev = series.dataByIndex(logical - 1) as MainBar | null
+      ohlcStore.set({ t: bar.time, o: bar.open, h: bar.high, l: bar.low, c: bar.close, v: bar.volume ?? 0, prev: prev && prev.close !== undefined ? prev.close : null, hovering: true })
+    }
 
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0]
@@ -721,6 +776,12 @@ export function useChartEngine(
         const main = panes[0]?.getHeight() ?? applied.main
         const now: Record<string, number> = {}
         used.forEach((p, i) => { now[p.id] = panes[i + 1]?.getHeight() ?? applied.panes[p.id] })
+        // 尾部窗格的高度只记在引擎里（权重 = 像素 / 100，与页面存指标窗格的口径一致）
+        // Tail pane heights stay in the engine (weight = px / 100, the page's scale for indicator panes)
+        tailIdsRef.current.forEach((id, j) => {
+          const hpx = panes[used.length + 1 + j]?.getHeight()
+          if (hpx && hpx > 0) tailWeightRef.current.set(id, Math.max(0.1, hpx / 100))
+        })
         const moved = Math.abs(main - applied.main) > 2 || used.some((p) => !p.collapsed && Math.abs(now[p.id] - applied.panes[p.id]) > 2)
         if (!moved) return
         appliedRef.current = { main, panes: now }
@@ -745,6 +806,7 @@ export function useChartEngine(
       watermarkRef.current = null
       zonesRef.current = null
       instRef.current = new Map()
+      tailIdsRef.current = []
       setDrawReady(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- build the chart once
@@ -765,7 +827,7 @@ export function useChartEngine(
         horzLines: { color: pal.grid, visible: view.grid === 'both' || view.grid === 'horz' },
       },
       crosshair: { mode: cross === 'magnet' ? CrosshairMode.Magnet : cross === 'hidden' ? CrosshairMode.Hidden : CrosshairMode.Normal, vertLine: lineOpts, horzLine: lineOpts },
-      rightPriceScale: { borderColor: pal.border, mode: view.scaleMode, invertScale: view.invertScale },
+      rightPriceScale: { borderColor: pal.border, mode: scaleOverrideRef.current ?? view.scaleMode, invertScale: view.invertScale },
       leftPriceScale: { borderColor: pal.border },
       timeScale: { borderColor: pal.border, rightOffset: view.rightOffset, tickMarkFormatter: timeFmt.tick },
       localization: { timeFormatter: timeFmt.crosshair },
@@ -847,7 +909,9 @@ export function useChartEngine(
     const chart = chartRef.current
     const main = seriesRef.current
     if (!chart || !main) return
-    // 拆 / tear down
+    // 拆（尾部窗格先拆，免得指标窗格被删后它挪到指标的下标上）
+    // Tear down (tail panes first, so they don't slide into the indicator pane indices)
+    tailHostRef.current?.detach()
     instRef.current.forEach((h) => {
       if (h.prim && h.host) { try { h.host.detachPrimitive(h.prim) } catch { /* 已随 series 删除 / gone with its series */ } }
       if (h.shp && h.host) { try { h.host.detachPrimitive(h.shp) } catch { /* 同上 / same */ } }
@@ -885,7 +949,10 @@ export function useChartEngine(
       host.attachPrimitive(shp)
       instRef.current.set(inst.uid, { uid: inst.uid, pane: pane === 0 ? 'main' : inst.pane, plots, host, prim, shp, lines: [] })
     }
-    chart.applyOptions({ leftPriceScale: { visible: anyLeft } })
+    indLeftRef.current = anyLeft
+    chart.applyOptions({ leftPriceScale: { visible: anyLeft || leftClaimRef.current } })
+    indPaneCountRef.current = used.length
+    tailIdsRef.current = tailHostRef.current?.attach(used.length + 1) ?? []
     applyStyles()
     applyPaneHeights()
     recomputeIndicators()
@@ -973,11 +1040,41 @@ export function useChartEngine(
 
   const getResults = useCallback(() => resultsRef.current, [])
 
+  // ──── 阶段 6：对比品种 / phase 6: compare symbols ────
+  // 主价格轴模式的临时覆盖（null = 回到设置里的模式）。不改用户设置，撤掉覆盖就是原样恢复。
+  // Temporary override of the main price-scale mode (null = back to the setting). The user's
+  // setting is never written, so dropping the override restores it exactly.
+  const setScaleOverride = useCallback((m: ScaleMode | null) => {
+    if (scaleOverrideRef.current === m) return
+    scaleOverrideRef.current = m
+    const mode = m ?? viewRef.current?.scaleMode ?? 0
+    try { chartRef.current?.priceScale('right').applyOptions({ mode }) } catch { /* 图表已销毁 / disposed */ }
+  }, [])
+  // 认领 / 释放左侧价格轴（对比品种的 scale 模式）/ claim / release the left price scale (compare in scale mode)
+  const setLeftScaleClaim = useCallback((on: boolean) => {
+    if (leftClaimRef.current === on) return
+    leftClaimRef.current = on
+    try { chartRef.current?.applyOptions({ leftPriceScale: { visible: indLeftRef.current || on } }) } catch { /* disposed */ }
+  }, [])
+  const indicatorsUseLeft = useCallback(() => indLeftRef.current, [])
+  // 登记尾部窗格的宿主（null = 撤销；撤销前宿主自己要先 detach）/ register the tail-pane host (null = unregister; detach first)
+  const setTailPaneHost = useCallback((h: TailPaneHost | null) => { tailHostRef.current = h }, [])
+  // 尾部窗格变了（增删 / 换顺序）：拆了按顺序重建，再重分高度 / tail panes changed: rebuild in order, then re-split heights
+  const relayoutTailPanes = useCallback(() => {
+    if (!chartRef.current) return
+    const host = tailHostRef.current
+    host?.detach()
+    tailIdsRef.current = host?.attach(indPaneCountRef.current + 1) ?? []
+    applyPaneHeights()
+  }, [applyPaneHeights])
+
   return {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef, getBarTimes,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef,
     legendStore, ohlcStore, paneBoxes, drawReady, getResults,
     recomputeIndicators, applyPaneHeights, renderAll, renderTail,
+    setScaleOverride, setLeftScaleClaim, indicatorsUseLeft, setTailPaneHost, relayoutTailPanes,
+    syncLegendAt,
   }
 }
 
