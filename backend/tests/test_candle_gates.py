@@ -201,6 +201,20 @@ def test_stalled_run_resets_on_price_change():
     assert cs._stalled_tail_length(bars, []) == 0
 
 
+def test_history_stall_drops_only_the_stalled_run(db_session):
+    """历史回填（resume_after_stall）：停滞游程之后价格一动就放行，不再丢掉整批尾段。
+    History seeding drops only the stalled run and resumes once the price moves."""
+    moving = _walk(WED, 5, 60)
+    frozen = [_bar(WED + (5 + i) * 60, o=1.0, h=1.1, l=0.9, c=0.95, v=20 + i) for i in range(12)]
+    after = [dict(b, o=b["o"] + 50, h=b["h"] + 50, l=b["l"] + 50, c=b["c"] + 50) for b in _walk(WED + 17 * 60, 5, 60)]
+    batch = moving + frozen + after
+    live = cs.filter_tradeable_bars(db_session, "USDCHF", "1", batch)
+    hist = cs.filter_tradeable_bars(db_session, "USDCHF", "1", batch, resume_after_stall=True)
+    assert len(live) == 5 + 9                       # 实时：第 10 根起整批尾段丢掉
+    assert [b["t"] for b in hist] == [b["t"] for b in moving + frozen[:9] + after]
+    assert cs.persist_closed_bars(db_session, "USDCHF", "1", batch, resume_after_stall=True) == [b["t"] for b in hist]
+
+
 def test_stalled_gate_integration_reads_previous_closes(db_session):
     stored = [_bar(WED - (5 - i) * 300, c=7.0, h=7.5, l=6.5, v=i) for i in range(5)]
     _seed(db_session, "5", stored)

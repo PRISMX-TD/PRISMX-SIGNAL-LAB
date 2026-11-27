@@ -551,6 +551,35 @@ def _stalled_tail_length(
     return 0
 
 
+def _stalled_run_indices(
+    bars: list[dict], previous_closes: list[float], threshold: int = STALLED_CLOSE_BARS,
+) -> set[int]:
+    """历史回填用：只标出处于停滞游程里的那几根（游程第 threshold 根起），价格一动就恢复放行。
+
+    为什么历史批次不能沿用「丢尾段」（2026-11-27）：一次历史回填一批 2000 根，直接来自
+    MT5 / MC 服务器，不是实时喂价端。USDCHF 在每天 22:00 UTC 换日前后会有 10 多分钟收盘
+    价不动，按丢尾段规则这一批停滞点之后的 1000 多根真实 bar 全部被扔掉——回填 4 个新
+    外汇时 USDCHF 的 M1 少了近四分之一。实时路径每次只推几根，下一批价格一动游程就从 1
+    重来，本来就是「只丢停滞那一段」；这里让大批次得到与小批次相同的结果。
+    For history seeding (2026-11-27): mark only the bars inside a stalled run (from the
+    threshold-th on) and resume once the price moves. A history batch is 2000 bars straight
+    from MT5/MC; USDCHF holds its close for 10+ minutes around the 22:00 UTC rollover, and
+    the tail rule then discarded the remaining 1000+ real bars of the batch — nearly a
+    quarter of the seeded USDCHF M1. The live path pushes a few bars at a time, so its run
+    already restarts in the next batch; this gives a large batch the same outcome.
+    """
+    prior = [round(c, _PRICE_DECIMALS) for c in previous_closes]
+    series = prior + [round(b["c"], _PRICE_DECIMALS) for b in bars]
+    offset = len(prior)
+    dropped: set[int] = set()
+    run = 1
+    for i in range(1, len(series)):
+        run = run + 1 if series[i] == series[i - 1] else 1
+        if i >= offset and run >= threshold:
+            dropped.add(i - offset)
+    return dropped
+
+
 def _is_replayed_duplicate(bar: dict, recent: set[tuple]) -> bool:
     """判断一根 bar 是不是喂价端重放的旧 bar 副本(休市期间的伪造 K 线)。
 
@@ -924,6 +953,7 @@ def _evict_interval_below(interval: str, cutoff: int) -> None:
 def filter_tradeable_bars(
     db, symbol: str, interval: str, bars: list[dict],
     include_forming: bool = False,
+    resume_after_stall: bool = False,
 ) -> list[dict]:
     """把 `bars` 过成"确实是真实交易时段产生的"那一部分,按时间升序返回。
 
@@ -1226,7 +1256,11 @@ def filter_tradeable_bars(
             .limit(stall_threshold * 2)
             .all()
         ][::-1]  # 查询是倒序,反转回时间升序 / query is descending; restore ascending order
-    stalled_count = _stalled_tail_length(closed, previous_closes, stall_threshold)
+    if resume_after_stall:
+        drop = _stalled_run_indices(closed, previous_closes, stall_threshold)
+        stalled_count = len(drop)
+    else:
+        stalled_count = _stalled_tail_length(closed, previous_closes, stall_threshold)
     if stalled_count:
         # 与周末闸门同理记 info:节假日休市是预期行为,不是故障。
         # info for the same reason as the weekend gate: a holiday closure is expected
@@ -1237,7 +1271,10 @@ def filter_tradeable_bars(
             "holiday or unscheduled closure)",
             symbol, interval, stalled_count, stall_threshold,
         )
-        closed = closed[:-stalled_count]
+        closed = (
+            [b for i, b in enumerate(closed) if i not in drop]
+            if resume_after_stall else closed[:-stalled_count]
+        )
         if not closed:
             return []
 
@@ -1420,6 +1457,7 @@ def filter_tradeable_bars_both(
 def persist_closed_bars(
     db, symbol: str, interval: str, bars: list[dict],
     prefiltered: list[dict] | None = None,
+    resume_after_stall: bool = False,
 ) -> list[int]:
     """把 `bars` 里通过休市闸门的部分写入数据库;已存在的(symbol, interval, t)若值有变化就改写成新值。
 
@@ -1448,7 +1486,11 @@ def persist_closed_bars(
     redoing it is wasted work — and with a concurrent write between the two calls the
     two paths could even disagree. Omit it to filter internally.
     """
-    closed = prefiltered if prefiltered is not None else filter_tradeable_bars(db, symbol, interval, bars)
+    # resume_after_stall：历史回填（mode=history）传 True，见 _stalled_run_indices。
+    # resume_after_stall: True for history seeding (mode=history); see _stalled_run_indices.
+    closed = prefiltered if prefiltered is not None else filter_tradeable_bars(
+        db, symbol, interval, bars, resume_after_stall=resume_after_stall,
+    )
     if not closed:
         return []
 

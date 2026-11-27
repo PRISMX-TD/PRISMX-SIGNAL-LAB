@@ -321,7 +321,7 @@ def _persist_history_sync(db: Session, symbol: str, interval: str, bars: list[di
     """history 批次落库：不带 prefiltered，闸门由 persist_closed_bars 内部自行跑。
     整段是同步 SQLAlchemy（两次闸门查库 + 一次存在性查询 + 一次 commit）。
     History batch persist; the gates run inside persist_closed_bars itself."""
-    return candle_store.persist_closed_bars(db, symbol, interval, bars)
+    return candle_store.persist_closed_bars(db, symbol, interval, bars, resume_after_stall=True)
 
 
 def _persist_live_sync(
