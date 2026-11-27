@@ -63,6 +63,14 @@ KIND_LUCKY_CANCELLED = "lucky_prize_cancelled"
 # 对应品种。标题在前端 `notifFeed.chart_alert`（5 语）。
 # A chart alert went off (rev 56): text is the alert message, the link opens /charts on that symbol.
 KIND_CHART_ALERT = "chart_alert"
+# 交易报告月底存档完成（2026-11-27）：persona_report = 上个月的报告出炉了，text 是月份（YYYY-MM）；
+# persona_changed = 出炉的同时人格变了，text 是「旧代号 → 新代号 · 月份」。链接都是 /persona。
+# 标题在前端 `notifFeed.<kind>`（5 语）。只在「对用户开放」开着、且按时存档时发，见 persona/loop.py。
+# The monthly report was archived (2026-11-27): persona_report carries the month, persona_changed
+# "OLD → NEW · month" when the persona changed with it. Both link to /persona; titles live in the
+# frontend's notifFeed.<kind>. Sent only while the user switch is on and the archive ran on time.
+KIND_PERSONA_REPORT = "persona_report"
+KIND_PERSONA_CHANGED = "persona_changed"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。

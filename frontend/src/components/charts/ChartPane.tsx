@@ -12,7 +12,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import type { IChartApi, LogicalRange, Time } from 'lightweight-charts'
 import { useTranslation } from 'react-i18next'
 import type { Order, Quote } from '../../api/types'
-import { brokerSymbol, localizeApiError } from '../../api/utils'
+import { baseSymbol, brokerSymbol, localizeApiError } from '../../api/utils'
 import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../../store/live'
 import { useBackToClose } from '../../utils/useBackToClose'
 import { isAppHidden } from '../../utils/appVisibility'
@@ -21,6 +21,8 @@ import type { SymbolSpec } from '../order/orderMath'
 import DrawLayer, { type DrawLayerHandle } from './DrawLayer'
 import PositionOverlay, { type DraftRequest } from './PositionOverlay'
 import ExecutionMarkers from './trade/ExecutionMarkers'
+import FocusTradeLayer from './trade/FocusTradeLayer'
+import type { FocusTrade } from './trade/focusTrade'
 import TradeButtons from './trade/TradeButtons'
 import PlusOrderButton from './trade/PlusOrderButton'
 import type { ChartPlace, ChartPlaceReq } from './trade/useTradeActions'
@@ -314,6 +316,11 @@ interface Props {
   onCompareChange?: (idx: number, c: CompareEntry[]) => void
   // 专业版右栏「对象树」面板的容器（只给当前格）/ the pro right panel's object-tree host (active cell only)
   treeHost?: HTMLElement | null
+  // 交易报告里点过来的那一单（只给收到它的那一格）：切到 interval 这个周期后，把开仓那根放到屏幕中间
+  // 并画出开平点。/ The trade opened from the trading report (given to one cell only): once the cell is
+  // on `interval`, centre its entry bar and draw the entry and exit.
+  focusTrade?: (FocusTrade & { interval: string }) | null
+  onFocusClose?: () => void
 }
 const NO_COMPARE: CompareEntry[] = []
 
@@ -540,6 +547,30 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
     ts2.setVisibleLogicalRange({ from: lo - half, to: lo + half })
     if (lo === 0 && times[0] > ts) showToast(t('charts.goto.earliest'), 'error')
   }, [ensureHistory, chartRef, engine.barTimesRef, showToast, t])
+
+  // 交易报告点过来的那一单：等这一格换到指定的品种和周期、K 线到了，再跳过去——每个 id 只跳一次，
+  // 之后用户自己拖动、换周期都不再抢视野（标记还在）。等不到（约 10 秒）就放弃，不跳。
+  // The trade from the trading report: wait until this cell is on its symbol and interval with bars
+  // loaded, then jump — once per id, so later panning or interval changes are left alone (the marker
+  // stays). Gives up after ~10 s.
+  const focusRaw = p.focusTrade ?? null
+  const focus = focusRaw && baseSymbol(symbol) === focusRaw.symbol ? focusRaw : null
+  const focusDoneRef = useRef<string | null>(null)
+  const focusTriesRef = useRef(0)
+  const [focusTick, setFocusTick] = useState(0)
+  useEffect(() => {
+    if (!focus || focusDoneRef.current === focus.id) return
+    const ready = chartRef.current && interval === focus.interval
+      && dataKeyRef.current === `${symbol}|${interval}` && engine.candlesRef.current.length > 0
+    if (!ready) {
+      if (focusTriesRef.current++ > 40) { focusDoneRef.current = focus.id; focusTriesRef.current = 0; return }
+      const id = window.setTimeout(() => setFocusTick((x) => x + 1), 250)
+      return () => window.clearTimeout(id)
+    }
+    focusDoneRef.current = focus.id
+    focusTriesRef.current = 0
+    void goToTime(focus.t1)
+  }, [focus, focusTick, symbol, interval, hasData, chartRef, engine.candlesRef, goToTime])
 
   // 截图 / screenshot
   const takeShot = useCallback(async (mode: 'save' | 'copy') => {
@@ -779,6 +810,18 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
         <MeasureOverlay chart={chartRef.current!} series={seriesRef.current!} host={containerRef.current} armed={p.measureOn} onDone={p.onMeasureDone} decimals={decimals} barTimes={getBarTimes} colors={env.dirColors} />
       )}
       {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
+      {ready && focus && !replayActive && (
+        <FocusTradeLayer
+          chart={chartRef.current!}
+          series={seriesRef.current!}
+          trade={focus}
+          barTimes={getBarTimes}
+          dataKey={`${interval}|${hasData}|${lastPrice}`}
+          drawable={!priceBased}
+          fmtTime={drawFmtTime}
+          onClose={() => p.onFocusClose?.()}
+        />
+      )}
       {/* 财经事件徽章（主图底部；悬停 / 点按出卡片，卡片走 body portal）/ econ event badges (card in a body portal) */}
       {drawReady && (
         <EconEventsLayer

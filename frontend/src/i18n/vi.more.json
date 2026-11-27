@@ -2311,6 +2311,11 @@
       "tooBig": "Bố cục quá lớn để lưu (hãy bớt chỉ báo)",
       "maximize": "Phóng to",
       "restore": "Khôi phục"
+    },
+    "focus": {
+      "title": "Lệnh từ báo cáo của bạn",
+      "noPrice": "Báo cáo này được lưu trước khi có giá khớp, nên chỉ hiển thị thời điểm mở lệnh.",
+      "close": "Đóng"
     }
   },
   "winrate": {
@@ -4526,7 +4531,8 @@
         "worst": "Lệnh lỗ lớn nhất",
         "avgWin": "Lãi trung bình mỗi lệnh",
         "avgLoss": "Lỗ trung bình mỗi lệnh"
-      }
+      },
+      "floating": "Các vị thế đang mở đang lỗ tạm tính {{loss}} ({{n}} lệnh), chưa tính vào số liệu tháng này. Nếu đến cuối tháng vẫn chưa đóng sẽ được tính là lỗ."
     },
     "unit": {
       "sec": "{{n}} giây",
@@ -4654,7 +4660,9 @@
       "stoppedOut": {
         "name": "Cưỡng chế đóng",
         "desc": "Bị hệ thống cưỡng chế đóng vị thế"
-      }
+      },
+      "onChart": "Xem lệnh này trên biểu đồ",
+      "tapHint": "Chạm mũi tên bên cạnh một lệnh để xem điểm vào và điểm ra trên biểu đồ."
     },
     "side": {
       "buy": "Mua",
@@ -4761,6 +4769,22 @@
     "intro": {
       "title": "Tính cách giao dịch được tính thế nào",
       "how": "Hệ thống xem các lệnh tài khoản thật bạn đặt trên nền tảng này trong 90 ngày gần nhất, chọn một chữ cái cho mỗi trục — phán đoán, quản lý rủi ro, nhịp độ và quản lý lệnh — ghép thành mã bốn chữ, tổng cộng 16 loại. Tính lại vào ngày 1 mỗi tháng và là kết quả sơ bộ cho đến khi đủ 50 lệnh."
+    },
+    "outlook": {
+      "title": "Xu hướng tháng này",
+      "same": "Cứ theo đà này, tháng sau bạn vẫn là \"{{name}}\".",
+      "changed": "Cứ theo đà này, tháng sau bạn sẽ chuyển từ \"{{from}}\" sang \"{{to}}\".",
+      "flip": "{{from}} → {{to}}",
+      "drift": "Lệch {{n}} về phía \"{{pole}}\"",
+      "still": "Không đổi",
+      "note": "Ước tính từ lệnh tài khoản thật 90 ngày gần nhất và các vị thế đang mở, cùng cách tính với kỳ chốt ngày 1 hằng tháng. Tính cách chính thức chỉ cập nhật vào lúc đó."
+    },
+    "compare": {
+      "vs": "so với {{month}}",
+      "short": "so với tháng trước",
+      "trend": "Diễn biến điểm tổng hợp",
+      "note": "Mũi tên so sánh với {{month}}.",
+      "noteLive": "Mũi tên so sánh với {{month}}. Tháng chưa kết thúc nên lãi lỗ ròng và số lệnh sẽ được so sánh sau khi lưu báo cáo."
     }
   }
 }

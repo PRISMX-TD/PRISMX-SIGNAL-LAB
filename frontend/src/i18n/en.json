@@ -30,7 +30,9 @@
     "lucky_prize_cancelled": "Your prize was cancelled",
     "agent_tree_change": "An ambassador changed their downline ambassadors",
     "agent_promoted": "You're now an ambassador · open your Ambassador Hub",
-    "chart_alert": "Chart alert triggered"
+    "chart_alert": "Chart alert triggered",
+    "persona_report": "Your trading report is out",
+    "persona_changed": "Your trading report is out and your persona changed"
   },
   "nav": {
     "dashboard": "Dashboard",

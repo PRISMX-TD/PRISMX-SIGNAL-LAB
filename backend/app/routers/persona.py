@@ -46,6 +46,16 @@ def require_persona_visible(db: Session = Depends(get_db), user: User = Depends(
     return user
 
 
+def _open_rows(user_id: str):
+    """此刻的持仓快照，给当月报告算「未计入的浮亏」和人格走向用；读不到就当没有。
+    The live positions snapshot for the live month's floating loss and outlook; None when unavailable."""
+    try:
+        from app.services.connection_manager import manager
+        return manager.get_positions_shared(user_id)
+    except Exception:  # noqa: BLE001 —— 快照读不到，报告照出 / optional; the report still renders
+        return None
+
+
 def _overview(db: Session, user_id: str) -> dict:
     def compute():
         st = service.status(db, user_id)
@@ -53,7 +63,8 @@ def _overview(db: Session, user_id: str) -> dict:
             return st
         now = service.utcnow()
         return {**st, "months": service.months(db, user_id, now),
-                "report": service.report_for(db, user_id, service.period_of(now), now)}
+                "report": service.report_for(db, user_id, service.period_of(now), now,
+                                             open_rows=_open_rows(user_id))}
     return shared_cache.cached_json(f"persona:me:{user_id}", _CACHE_SECONDS, compute)
 
 
@@ -65,7 +76,9 @@ def _report(db: Session, user_id: str, period: str) -> dict:
         raise HTTPException(404, "报告还没解锁 / Report not unlocked yet")
 
     def compute():
-        return service.report_for(db, user_id, period)
+        now = service.utcnow()
+        rows = _open_rows(user_id) if period == service.period_of(now) else None
+        return service.report_for(db, user_id, period, now, open_rows=rows)
     rep = shared_cache.cached_json(f"persona:rep:{user_id}:{period}", _CACHE_SECONDS, compute)
     if rep is None:
         raise HTTPException(404, "这个月没有报告 / No report for this month")

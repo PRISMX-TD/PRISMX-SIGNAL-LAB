@@ -30,7 +30,9 @@
     "lucky_prize_cancelled": "Phần thưởng đã bị hủy",
     "agent_tree_change": "Một đại sứ đã thay đổi đại sứ cấp dưới",
     "agent_promoted": "Bạn đã trở thành đại sứ · mở Trung tâm Đại sứ",
-    "chart_alert": "Cảnh báo biểu đồ đã kích hoạt"
+    "chart_alert": "Cảnh báo biểu đồ đã kích hoạt",
+    "persona_report": "Báo cáo giao dịch của bạn đã có",
+    "persona_changed": "Báo cáo giao dịch đã có và tính cách giao dịch của bạn đã thay đổi"
   },
   "nav": {
     "dashboard": "Tổng quan",

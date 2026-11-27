@@ -107,17 +107,24 @@ def status(db, user_id: str, now: datetime | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 月报 / monthly report
+def _trade_ref(p) -> dict:
+    """一笔单的定位信息：报告里点它能跳到图表上那一段（品种、开平时间和价格）。
+    Enough of a trade to open the chart on it: symbol, open / close time and price."""
+    return {
+        "symbol": p.symbol, "side": p.side, "volume": p.volume,
+        "openAt": p.open_at.isoformat(), "closeAt": p.close_at.isoformat(),
+        "openPrice": p.open_price, "closePrice": p.close_price,
+        "profit": round(p.profit, 2), "unrealized": p.unrealized,
+    }
+
+
 def _tagged_trades(positions, tags) -> list[dict]:
     rows = []
     for p in sorted(positions, key=lambda q: q.close_at, reverse=True):
         t = tags.get((p.login, p.ticket)) or []
         if not t:
             continue
-        rows.append({
-            "symbol": p.symbol, "side": p.side, "volume": p.volume,
-            "openAt": p.open_at.isoformat(), "closeAt": p.close_at.isoformat(),
-            "profit": round(p.profit, 2), "unrealized": p.unrealized, "tags": t,
-        })
+        rows.append({**_trade_ref(p), "tags": t})
         if len(rows) >= TAGGED_TRADES_LIMIT:
             break
     return rows
@@ -141,6 +148,9 @@ def build_report(db, user_id: str, period: str, now: datetime, persona: dict | N
     change = None
     if prev is not None and persona and prev.code != persona.get("code"):
         change = {"from": prev.code, "to": persona.get("code")}
+    closed = [p for p in month if not p.unrealized]
+    best = max(closed, key=lambda p: p.profit) if closed else None
+    worst = min(closed, key=lambda p: p.profit) if closed else None
     return {
         "version": REPORT_VERSION,
         "period": period,
@@ -154,6 +164,10 @@ def build_report(db, user_id: str, period: str, now: datetime, persona: dict | N
         "taggedTrades": _tagged_trades(month, tags),
         "badges": engine.badges(month, window_positions),
         "openLosers": sum(1 for p in month if p.unrealized),
+        # 最大单笔盈利 / 亏损是哪一笔（summary 里只有金额）。2026-11-27 之前存档的报告没有这两项。
+        # Which trades the best / worst figures are; reports archived before 2026-11-27 lack them.
+        "bestTrade": _trade_ref(best) if best is not None and best.profit > 0 else None,
+        "worstTrade": _trade_ref(worst) if worst is not None and worst.profit < 0 else None,
         "change": change,
         "previousCode": prev.code if prev is not None else None,
     }
@@ -184,21 +198,80 @@ def months(db, user_id: str, now: datetime | None = None) -> list[str]:
     return sorted(out, reverse=True)
 
 
-def report_for(db, user_id: str, period: str, now: datetime | None = None) -> dict | None:
+# 跨月对比：上个月的几项指标 + 最近几个月的综合评分。读的时候现拼，不写进存档，所以旧存档也有。
+# Month-over-month: last month's figures plus the score of recent months. Attached on read rather
+# than stored, so reports archived earlier get it too.
+TREND_MONTHS = 6
+_COMPARE_KEYS = ("trades", "profit", "winRate", "payoff", "score", "maxDrawdown", "medianHoldMin")
+
+
+def _attach_history(db, user_id: str, period: str, rep: dict) -> None:
+    rows = (db.query(PersonaReport.period, PersonaReport.report_json)
+              .filter(PersonaReport.user_id == user_id, PersonaReport.period < period)
+              .order_by(PersonaReport.period.desc()).limit(TREND_MONTHS - 1).all())
+    past: dict = {}
+    for per, raw in rows:
+        try:
+            past[per] = (json.loads(raw or "{}") or {}).get("summary") or {}
+        except ValueError:
+            past[per] = {}
+    prev = past.get(previous_period(period))
+    rep["previous"] = ({"period": previous_period(period), **{k: prev.get(k) for k in _COMPARE_KEYS}}
+                       if prev and prev.get("trades") else None)
+    trend = [{"period": per, "score": sm.get("score")} for per, sm in sorted(past.items())
+             if sm.get("score") is not None]
+    own = (rep.get("summary") or {}).get("score")
+    if own is not None:
+        trend.append({"period": period, "score": own})
+    rep["trend"] = trend
+
+
+def _outlook(state: PersonaState | None, positions) -> dict | None:
+    """「如果今天结算」的人格：和月底存档同一个口径（最近 90 天 + 此刻的浮亏单，缓冲带沿用现在的字母）。
+    还没有人格、或眼下不够解锁条件（存档时会沿用旧人格）就不给。
+    The persona "if the month closed today", computed exactly like the month-end archive (last 90 days
+    plus current floating losers, buffered axes keep their letter). None without a persona, or while the
+    window is below the unlock bar (the archive would keep the old persona then)."""
+    if state is None or not engine.unlock_status(positions)["unlocked"]:
+        return None
+    nxt = engine.compute_persona(positions, previous_code=state.code)
+    return {
+        "code": nxt["code"],
+        "family": nxt["family"],
+        "from": state.code,
+        "changed": nxt["code"] != state.code,
+        "axes": {k: {"letter": v["letter"], "value": v["value"]} for k, v in nxt["axes"].items()},
+    }
+
+
+def report_for(db, user_id: str, period: str, now: datetime | None = None, open_rows=None) -> dict | None:
     """某个月的报告：存档过的读存档；当月实时算；更早又没存档的返回 None。
-    Archived months come from the archive, the current month is computed live, other months are None."""
+    open_rows：此刻的持仓快照（connection_manager 的行）。给了的话，当月报告会带上「还没计入的浮亏」
+    和「如果今天结算」的人格走向；已存档的月份用不到。
+    Archived months come from the archive, the current month is computed live, other months are None.
+    open_rows is the live positions snapshot: with it the live month also carries the floating loss not
+    yet counted and the persona outlook; archived months ignore it."""
     now = now or utcnow()
     row = (db.query(PersonaReport)
              .filter(PersonaReport.user_id == user_id, PersonaReport.period == period).first())
     if row is not None:
-        return report_out(row)
+        rep = report_out(row)
+        _attach_history(db, user_id, period, rep)
+        return rep
     if period != period_of(now):
         return None
     st = db.query(PersonaState).filter(PersonaState.user_id == user_id).first()
     persona = _state_dict(st) if st else None
-    rep = build_report(db, user_id, period, now, persona)
+    since, until = _window(now)
+    window = load_positions(db, user_id, since, until)
+    rep = build_report(db, user_id, period, now, persona, window_positions=window)
     rep["comment"] = None
     rep["archivedAt"] = None
+    losers = open_losing_positions(db, user_id, open_rows, now) if open_rows else []
+    rep["floating"] = ({"count": len(losers), "loss": round(sum(p.profit for p in losers), 2)}
+                       if losers else None)
+    rep["outlook"] = _outlook(st, window + losers)
+    _attach_history(db, user_id, period, rep)
     return rep
 
 

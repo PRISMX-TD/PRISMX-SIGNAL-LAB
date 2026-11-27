@@ -249,6 +249,160 @@ def test_archive_pass_watermark(db_session, monkeypatch):
     assert again["done"] and again["archived"] == 0
 
 
+def test_live_report_outlook_floating_and_trade_refs(db_session):
+    """当月报告的三样新东西：人格走向（和月底存档同口径）、还没计入的浮亏、最好 / 最差那一笔的定位信息。"""
+    u = _user(db_session, "o@t.co", "tok_o")
+    _seed(db_session, u, T0, n=24)
+    now = T0 + timedelta(days=6)
+    service.status(db_session, u.id, now)
+    rep = service.report_for(db_session, u.id, "2026-11", now)
+    # 没给持仓快照：没有浮亏；走向和现在的人格一致
+    assert rep["floating"] is None
+    code = db_session.query(PersonaState).filter_by(user_id=u.id).one().code
+    assert rep["outlook"]["code"] == code and rep["outlook"]["changed"] is False and rep["outlook"]["from"] == code
+    assert set(rep["outlook"]["axes"]) == set(engine.AXES)
+    # 最好 / 最差的一笔带品种、时间、价格，金额和 summary 对得上
+    assert rep["bestTrade"]["profit"] == rep["summary"]["best"] == 15.0
+    assert rep["worstTrade"]["profit"] == rep["summary"]["worst"] == -8.0
+    assert rep["bestTrade"]["symbol"] == "XAUUSD" and rep["bestTrade"]["openPrice"] == 100.0
+    assert rep["bestTrade"]["closePrice"] == pytest.approx(101.0) and rep["bestTrade"]["openAt"] < rep["bestTrade"]["closeAt"]
+    # 浮亏的实盘持仓：只报数，不进当月统计；浮盈的、对不上本平台实盘单的都不算
+    db_session.add(Order(user_id=u.id, client_order_id="open1", symbol="XAUUSD", side="BUY", volume=0.1,
+                         status="FILLED", mt5_login="77", mt5_ticket=9999, trade_mode=2,
+                         created_at=(T0 + timedelta(days=5)).replace(tzinfo=None)))
+    db_session.commit()
+    rows = [{"ticket": 9999, "login": "77", "profit": -42.5},
+            {"ticket": 9998, "login": "77", "profit": 30.0},
+            {"ticket": 1234, "login": "77", "profit": -5.0}]
+    rep2 = service.report_for(db_session, u.id, "2026-11", now, open_rows=rows)
+    assert rep2["floating"] == {"count": 1, "loss": -42.5}
+    assert rep2["summary"]["trades"] == 24 and rep2["openLosers"] == 0
+
+
+def test_outlook_follows_the_window_not_the_stored_persona(db_session):
+    """走向按「此刻的最近 90 天」重算：存着的人格是旧的，窗口里的单变了，走向就该不一样。"""
+    u = _user(db_session, "o2@t.co", "tok_o2")
+    _seed(db_session, u, T0, n=24)
+    now = T0 + timedelta(days=6)
+    service.status(db_session, u.id, now)
+    st = db_session.query(PersonaState).filter_by(user_id=u.id).one()
+    real = st.code
+    # 把存着的代号的第一位（判断）翻过来；这批单全是自己下的（跟信号 0%），远在缓冲带外，走向应翻回去
+    st.code = ("R" if real[0] == "A" else "A") + real[1:]
+    db_session.commit()
+    rep = service.report_for(db_session, u.id, "2026-11", now)
+    assert rep["outlook"]["from"] == st.code and rep["outlook"]["code"][0] == real[0]
+    assert rep["outlook"]["changed"] is True
+
+
+def test_month_over_month_and_trend(db_session):
+    """跨月对比是读的时候拼的：上个月有存档才有 previous；trend 按月份从早到晚、最后一项是本月。"""
+    u = _user(db_session, "m@t.co", "tok_m")
+    oct0 = datetime(2026, 10, 5, 8, 0, tzinfo=timezone.utc)
+    _seed(db_session, u, oct0, n=24)
+    assert service.archive_user(db_session, u.id, "2026-10", datetime(2026, 11, 1, 0, 10, tzinfo=timezone.utc))
+    for i in range(6):
+        _trade(db_session, u, 7000 + i, T0 + timedelta(hours=i), profit=20.0 if i % 2 else -5.0)
+    db_session.commit()
+    now = T0 + timedelta(days=6)
+    octo = service.report_for(db_session, u.id, "2026-10", now)
+    assert octo["previous"] is None and [t["period"] for t in octo["trend"]] == ["2026-10"]
+    nov = service.report_for(db_session, u.id, "2026-11", now)
+    assert nov["previous"]["period"] == "2026-10" and nov["previous"]["trades"] == 24
+    assert nov["previous"]["score"] == octo["summary"]["score"]
+    assert nov["previous"]["winRate"] == octo["summary"]["winRate"]
+    assert [t["period"] for t in nov["trend"]] == ["2026-10", "2026-11"]
+    assert nov["trend"][-1]["score"] == nov["summary"]["score"]
+
+
+def _archive_env(db_session, monkeypatch):
+    from app.services import notification_feed, push_dispatch
+    from app.services.persona import loop
+    monkeypatch.setattr(loop, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    sent: dict = {"ws": [], "push": []}
+    monkeypatch.setattr(notification_feed, "notify_ws_many", lambda ids: sent["ws"].append(list(ids)))
+    monkeypatch.setattr(push_dispatch, "dispatch_users_push",
+                        lambda ids, event, title, body, url, tag: (sent["push"].append((list(ids), event, title, url)),
+                                                                   sent.setdefault("body", []).append(body)))
+    return loop, sent
+
+
+def test_archive_notifies_only_when_open_to_users_and_on_time(db_session, monkeypatch):
+    """月报出炉通知：开关关着不发；开着且按时存档才发，人格变了换一种；晚于月底 6 小时补存的不发。"""
+    from app.models import UserNotification
+    loop, sent = _archive_env(db_session, monkeypatch)
+    same = _user(db_session, "n1@t.co", "tok_n1")
+    moved = _user(db_session, "n2@t.co", "tok_n2")
+    for u in (same, moved):
+        _seed(db_session, u, T0, n=24)
+        service.status(db_session, u.id, T0 + timedelta(days=6))
+    st = db_session.query(PersonaState).filter_by(user_id=moved.id).one()
+    real = st.code
+    flipped = ("R" if real[0] == "A" else "A") + real[1:]
+    st.code = flipped                                            # 存档时会被算回 real → 人格变了
+    db_session.commit()
+
+    # 开关关着：照常存档，一条通知都没有
+    res = loop.run_archive_pass(datetime(2026, 12, 1, 0, 30, tzinfo=timezone.utc))
+    assert res["archived"] == 2
+    assert db_session.query(UserNotification).count() == 0 and sent == {"ws": [], "push": []}
+
+    # 第二个人的界面语言是英文（云端偏好里），推送应该用英文、月份写月份名
+    from app.models import UserPref
+    db_session.add(UserPref(user_id=moved.id, data='{"lang": {"lang": "en", "at": 1}}'))
+    db_session.commit()
+
+    # 开关开着、按时存档：一人一条，变了的是 persona_changed
+    db_session.query(PersonaReport).delete()
+    from app.models import PlatformSetting
+    db_session.query(PlatformSetting).filter_by(key=loop.WATERMARK_KEY).delete()
+    st.code = flipped
+    db_session.commit()
+    _admin_settings(db_session, persona_visible=True)
+    res = loop.run_archive_pass(datetime(2026, 12, 1, 0, 40, tzinfo=timezone.utc))
+    assert res["archived"] == 2
+    rows = {n.user_id: n for n in db_session.query(UserNotification).all()}
+    assert rows[same.id].kind == "persona_report" and rows[same.id].text == "2026-11"
+    assert rows[moved.id].kind == "persona_changed" and rows[moved.id].text == f"{flipped} → {real} · 2026-11"
+    assert all(n.link == "/persona" for n in rows.values())
+    assert sorted(sent["ws"][0]) == sorted([same.id, moved.id])
+    assert {(tuple(ids), ev) for ids, ev, _t, _u in sent["push"]} == {((same.id,), "persona_report"), ((moved.id,), "persona_report")}
+    titles = {tuple(ids): t for ids, _e, t, _u in sent["push"]}
+    assert titles[(same.id,)] == "交易报告出炉"                    # 没同步过语言 → 中文
+    assert titles[(moved.id,)] == "Your trading persona changed"   # 英文用户、人格变了
+    assert any("November" in b for b in sent["body"]) and any("11 月" in b for b in sent["body"])
+
+    # 服务停过、月底 6 小时之后才补存：不发
+    db_session.query(PersonaReport).delete()
+    db_session.query(UserNotification).delete()
+    db_session.query(PlatformSetting).filter_by(key=loop.WATERMARK_KEY).delete()
+    db_session.commit()
+    sent["ws"].clear(); sent["push"].clear(); sent.pop("body", None)
+    res = loop.run_archive_pass(datetime(2026, 12, 1, 9, 0, tzinfo=timezone.utc))
+    assert res["archived"] == 2
+    assert db_session.query(UserNotification).count() == 0 and sent == {"ws": [], "push": []}
+    _admin_settings(db_session, persona_visible=False)
+
+
+def test_push_copy_covers_every_language_and_falls_back(db_session):
+    """五种语言、两种文案都要有，月份要填进去；认不出的语言、读不出的偏好一律按中文。"""
+    from app.models import UserPref
+    from app.services.persona import loop
+    for lang in loop.PUSH_LANGS:
+        for kind in ("same", "changed"):
+            title, body = loop.push_text(lang, kind, 3)
+            assert title and body and "{m}" not in body
+            assert ("March" if lang == "en" else "3") in body
+    assert loop.push_text("xx", "same", 11) == loop.push_text("zh", "same", 11)
+    a, b, c, d = (_user(db_session, f"l{i}@t.co", f"tok_l{i}") for i in range(4))
+    db_session.add(UserPref(user_id=a.id, data='{"lang": {"lang": "ja"}}'))
+    db_session.add(UserPref(user_id=b.id, data='{"lang": {"lang": "fr"}}'))      # 不支持的语言
+    db_session.add(UserPref(user_id=c.id, data='not json'))                       # 坏数据
+    db_session.commit()
+    assert loop.user_langs(db_session, [a.id, b.id, c.id, d.id]) == {a.id: "ja", b.id: "zh", c.id: "zh", d.id: "zh"}
+
+
 def test_periods():
     assert service.month_bounds("2026-12")[1] == datetime(2027, 1, 1, tzinfo=timezone.utc)
     assert service.previous_period("2026-01") == "2025-12"

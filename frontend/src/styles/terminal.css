@@ -2334,6 +2334,48 @@
   .chart-latest:hover { color: var(--text-strong); }
 }
 
+/* 交易报告里点过来的那一单：主图顶部居中的小标签 / the trade opened from the trading report: a small label at the top of the main pane */
+.chart-focus {
+  position: absolute;
+  right: 76px;
+  top: 44px;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: min(460px, calc(100% - 92px));
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--r-tile);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.chart-focus-main { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.chart-focus-ttl { color: var(--text-3); }
+.chart-focus-body { display: inline-flex; align-items: center; gap: 10px; color: var(--text-strong); white-space: nowrap; }
+.chart-focus-body .is-up { color: var(--up); }
+.chart-focus-body .is-down { color: var(--down); }
+.chart-focus-note { flex-basis: 100%; color: var(--text-3); line-height: 1.5; }
+.chart-focus button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.chart-focus button:hover { background: rgb(255 255 255 / 0.08); color: var(--text-strong); }
+/* 手机：标签排在图例下面、横向撑满，只留方向、时间、盈亏 / phones: the label sits under the legend at full width and keeps only side, time and P&L */
+@media (max-width: 760px) {
+  .chart-focus { left: 8px; right: 8px; top: 58px; max-width: none; }
+  .chart-focus-ttl { display: none; }
+}
+
 /* 右键菜单 / context menu */
 .chart-ctx {
   position: fixed;

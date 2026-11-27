@@ -2311,6 +2311,11 @@
       "tooBig": "Layout too large to save (remove some indicators)",
       "maximize": "Maximize",
       "restore": "Restore"
+    },
+    "focus": {
+      "title": "Trade from your report",
+      "noPrice": "This report was archived before fill prices were kept, so only the entry time is shown.",
+      "close": "Close"
     }
   },
   "winrate": {
@@ -7451,7 +7456,8 @@
         "worst": "Worst trade",
         "avgWin": "Average win",
         "avgLoss": "Average loss"
-      }
+      },
+      "floating": "Open positions are down {{loss}} ({{n}}), not yet in this month's figures. Any still open at month end count as losses."
     },
     "unit": {
       "sec": "{{n}} s",
@@ -7579,7 +7585,9 @@
       "stoppedOut": {
         "name": "Stop-out",
         "desc": "Closed by the system as a forced stop-out"
-      }
+      },
+      "onChart": "View this trade on the chart",
+      "tapHint": "Tap the arrow beside a trade to see its entry and exit on the chart."
     },
     "side": {
       "buy": "Buy",
@@ -7686,6 +7694,22 @@
     "intro": {
       "title": "How the trading persona works",
       "how": "We look at your live trades on this platform over the last 90 days and pick one letter on each of four axes — judgement, risk, tempo and management. The four letters make your code; there are 16 in all. It is recalculated on the 1st of each month and stays a first read until 50 trades."
+    },
+    "outlook": {
+      "title": "This month's direction",
+      "same": "On current form you stay \"{{name}}\" next month.",
+      "changed": "On current form you move from \"{{from}}\" to \"{{to}}\" next month.",
+      "flip": "{{from}} → {{to}}",
+      "drift": "{{n}} toward \"{{pole}}\"",
+      "still": "No change",
+      "note": "Estimated from your last 90 days of live trades plus open positions, with the same maths as the settlement on the 1st. The official persona only updates then."
+    },
+    "compare": {
+      "vs": "vs {{month}}",
+      "short": "vs last month",
+      "trend": "Score trend",
+      "note": "Arrows compare with {{month}}.",
+      "noteLive": "Arrows compare with {{month}}. The month is not over, so net P&L and trade count are compared once it is archived."
     }
   }
 }

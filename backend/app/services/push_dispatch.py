@@ -251,11 +251,15 @@ EVENT_ECON_ALERT = "econ_alert"
 # A chart alert went off (rev 56). Each alert is user-created with its own push switch, so it is
 # always on: master switch, push window and plan still apply, the event whitelist does not.
 EVENT_CHART_ALERT = "chart_alert"
+# 交易报告月报出炉（2026-11-27）：每月一次、只发给有报告的人，进 ALWAYS_ON_EVENTS，不用补白名单。
+# The monthly trading report is out (2026-11-27): once a month, only to users who have one; always on,
+# so stored whitelists need no migration.
+EVENT_PERSONA_REPORT = "persona_report"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
     EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER, EVENT_LUCKY_WHEEL,
-    EVENT_ECON_ALERT, EVENT_CHART_ALERT,
+    EVENT_ECON_ALERT, EVENT_CHART_ALERT, EVENT_PERSONA_REPORT,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知

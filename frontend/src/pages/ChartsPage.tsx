@@ -109,7 +109,8 @@ import AlertDialog, { type AlertInit } from '../components/charts/alert/AlertDia
 import AlertManager from '../components/charts/alert/AlertManager'
 import { useChartAlerts } from '../components/charts/alert/alertStore'
 import { onChartAlertFired } from '../utils/chartAlertEvents'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { focusInterval, readFocusState, type FocusTrade } from '../components/charts/trade/focusTrade'
 import { EMPTY } from '../utils/format'
 // 专业版终端：同一张图表的第二套外壳（见 components/charts/pro/ 与 styles/chart-pro.css）
 // The pro terminal: a second shell around the same chart (components/charts/pro/, styles/chart-pro.css)
@@ -692,6 +693,27 @@ export default function ChartsPage() {
     pickSymbolLoose(wantSymbol)
     setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('symbol'); return n }, { replace: true })
   }, [wantSymbol, loaded, activeSymbols.length, pickSymbolLoose, setSearchParams])
+
+  // 交易报告里点「在图表上看这一单」过来的（路由 state 带着那一单，不进网址）：云端偏好到了之后，
+  // 当前格切到它的品种和合适的周期，剩下的（跳到开仓那根、画开平点）交给那一格。state 用完就清掉，
+  // 刷新或后退回来不会再跳一次。
+  // Arriving from "view this trade on the chart" in the trading report (the trade rides in router
+  // state, not the URL): once cloud prefs are in, the active cell switches to its symbol and a fitting
+  // interval; the cell itself jumps to the entry bar and draws the trade. The state is cleared after
+  // use so a reload or a back navigation doesn't jump again.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [focusTrade, setFocusTrade] = useState<{ trade: FocusTrade & { interval: string }; pane: number } | null>(null)
+  const incomingFocus = useMemo(() => readFocusState(location.state), [location.state])
+  useEffect(() => {
+    if (!incomingFocus || !loaded || activeSymbols.length === 0) return
+    const iv = focusInterval(incomingFocus, Date.now() / 1000)
+    setFocusTrade({ trade: { ...incomingFocus, interval: iv }, pane: activeRef.current })
+    pickSymbolLoose(incomingFocus.symbol)
+    setActiveInterval(iv)
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  }, [incomingFocus, loaded, activeSymbols.length, pickSymbolLoose, setActiveInterval, navigate, location.pathname, location.search])
+  const closeFocus = useCallback(() => setFocusTrade(null), [])
 
   useEffect(() => {
     if (!symbol) return // 尚未校正出有效品种前不写回偏好，避免用空字符串覆盖已保存的选择
@@ -1535,6 +1557,8 @@ export default function ChartsPage() {
                 compare={cg.panes[i]?.compare}
                 onCompareChange={onCompareChange}
                 treeHost={i === activeIdx && treeOpen ? treeHost : null}
+                focusTrade={focusTrade && focusTrade.pane === i ? focusTrade.trade : null}
+                onFocusClose={closeFocus}
               />
             ))}
             {/* 触屏拖动画线点 / 止盈止损线时的放大镜（全局只挂一个）/ the touch-drag loupe (one for the page) */}

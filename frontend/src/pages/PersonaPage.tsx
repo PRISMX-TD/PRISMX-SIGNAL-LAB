@@ -4,6 +4,9 @@
 // AI 点评（只在存档月份）→ 「交易人格是怎么算的」（默认收起，里面是 16 种人格）。
 // 没下过实盘单：只给「开通实盘」的钩子；下过但不够数：给解锁进度。
 // mode="client"（/persona/client）是推荐官看直属客户：邮箱在路由 state 里，没有分享按钮。
+// 2026-11-27 补的几块：四个主轴下面的「本月走向」（如果今天结算会是什么人格）、当月还没计入的
+// 浮亏、各项数字「比上月」的升降和近几个月的评分走势、标签单 / 最好最差单点了跳到图表上看那一单
+// （只在看自己的报告时能点）。这些字段旧存档可能没有，没有就不显示那一块。
 // 2026-11-22 视觉重做：动效只有进场一次（滚到才出现、数字滚动、曲线展开），没有常驻动画；
 // prefers-reduced-motion 下全部直接显示。
 //
@@ -15,17 +18,22 @@
 // progress. mode="client" is an ambassador viewing a direct customer (e-mail in router state, no
 // share). Motion is entrance-only (reveal on scroll, count-up, curve wipe); nothing loops, and
 // everything shows at once under prefers-reduced-motion.
+// Added 2026-11-27: the outlook under the axes (the persona if the month closed today), the floating
+// loss not yet counted, month-over-month arrows plus a score trend, and trades (tagged, best, worst)
+// that open the chart on that trade — own report only. Older archives may lack these fields; a block
+// without its data is simply not rendered.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { personaApi } from '../api/client'
-import type { Persona, PersonaBucket, PersonaOverview, PersonaProgress, PersonaReport, PersonaTag } from '../api/personaTypes'
+import type { Persona, PersonaBucket, PersonaOutlook, PersonaOverview, PersonaPrevious, PersonaProgress, PersonaReport, PersonaTag, PersonaTradeRef } from '../api/personaTypes'
 import { localizeApiError } from '../api/utils'
 import { LOCALE_TAG, currentLang } from '../i18n'
 import PageHead from '../components/PageHead'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { SkeletonLine } from '../components/Skeleton'
 import { AXES, FAMILY_COLOR, PERSONA_CODES, artUrl, familyOf, readArtStyle, writeArtStyle, type ArtStyle } from '../components/persona/personaMeta'
+import { focusFromRef } from '../components/charts/trade/focusTrade'
 import { onRovingKeyDown } from '../utils/rovingTabs'
 import { EMPTY } from '../utils/format'
 import '../components/persona/persona.css'
@@ -246,6 +254,7 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
             <PersonaStage persona={persona} style={style} onStyle={pickStyle} change={report?.change ?? null}
               onShare={mode === 'self' ? openShare : undefined} sharing={sharing} />
             <Spectrum persona={persona} />
+            {overview.report?.outlook && <Outlook persona={persona} outlook={overview.report.outlook} />}
           </div>
           <section className="pr-sec" aria-labelledby="pr-month-h">
             <div className="pr-st-head">
@@ -265,7 +274,7 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
             {err && <p className="pr-err" role="alert">{err}</p>}
             {loadingMonth && !report ? (
               <div className="pr-slab pr-month-skel"><SkeletonLine width="30%" /><SkeletonLine width="60%" /><SkeletonLine width="80%" /></div>
-            ) : report ? <MonthReport key={report.period} report={report} /> : null}
+            ) : report ? <MonthReport key={report.period} report={report} canOpen={mode === 'self'} /> : null}
           </section>
         </>
       ) : overview.status === 'locked' ? (
@@ -413,6 +422,48 @@ function axisFact(t: T, key: string, ax: Persona['axes'][keyof Persona['axes']] 
   return t('persona.axes.manage.fact', { p: pct(ax.share) })
 }
 
+// 本月走向：正式人格每月 1 号才换，这里按「此刻的最近 90 天」先算一遍（后端和月底存档同一个算法），
+// 告诉用户照这样下去下个月会是什么，以及每条轴比现在的人格挪了多少。
+// Outlook: the official persona only changes on the 1st; this previews it over the last 90 days as of
+// now (same maths as the month-end archive) and shows how far each axis has moved since.
+function Outlook({ persona, outlook }: { persona: Persona; outlook: PersonaOutlook }) {
+  const { t } = useTranslation()
+  return (
+    <Rv className="pr-outlook">
+      <div className="pr-outlook-head">
+        <p className="pr-kicker">{t('persona.outlook.title')}</p>
+        <p className={`pr-outlook-say ${outlook.changed ? 'is-changed' : ''}`}>
+          {outlook.changed
+            ? t('persona.outlook.changed', { from: t(`persona.types.${outlook.from}.title`), to: t(`persona.types.${outlook.code}.title`) })
+            : t('persona.outlook.same', { name: t(`persona.types.${outlook.code}.title`) })}
+        </p>
+      </div>
+      <ul className="pr-outlook-axes">
+        {AXES.map((a) => {
+          const now = outlook.axes[a.key]
+          const was = persona.axes[a.key]
+          if (!now) return null
+          const flipped = !!was && was.letter !== now.letter
+          const d = was ? Math.round(now.value - was.value) : 0
+          return (
+            <li key={a.key} className={flipped ? 'is-flip' : ''}>
+              <span className="pr-outlook-name">{t(`persona.axes.${a.key}.name`)}</span>
+              <b>
+                {flipped
+                  ? t('persona.outlook.flip', { from: t(`persona.pole.${was.letter}`), to: t(`persona.pole.${now.letter}`) })
+                  : d === 0
+                    ? t('persona.outlook.still')
+                    : t('persona.outlook.drift', { pole: t(`persona.pole.${d > 0 ? a.poles[1] : a.poles[0]}`), n: Math.abs(d) })}
+              </b>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="pr-small">{t('persona.outlook.note')}</p>
+    </Rv>
+  )
+}
+
 // ---------------------------------------------------------------- 未解锁 / locked + demo
 function ProgressRow({ label, have, need }: { label: string; have: number; need: number }) {
   const v = Math.min(1, need ? have / need : 0)
@@ -466,7 +517,101 @@ function DemoHero({ client }: { client: boolean }) {
 }
 
 // ---------------------------------------------------------------- 月报 / monthly report
-function MonthReport({ report }: { report: PersonaReport }) {
+// 「比上月」的升降。good：这项变大是好事（胜率、盈亏比、评分）、坏事（回撤），还是无所谓（持仓时间、笔数）。
+// 进行中的月份不比净盈亏和笔数——拿半个月和一整月比没有意义。
+// Month-over-month delta. `good` says whether a rise is good (win rate, payoff, score), bad (drawdown)
+// or neutral (holding time, trade count). A live month skips net P&L and trade count: half a month
+// against a whole one says nothing.
+type DeltaKind = 'winRate' | 'payoff' | 'score' | 'drawdown' | 'hold' | 'profit' | 'trades'
+function deltaOf(kind: DeltaKind, report: PersonaReport, t: T): { text: string; cls: string } | null {
+  const prev: PersonaPrevious | null | undefined = report.previous
+  if (!prev) return null
+  if (report.live && (kind === 'profit' || kind === 'trades')) return null
+  const s = report.summary
+  const pair: Record<DeltaKind, [number | null, number | null, 1 | -1 | 0]> = {
+    winRate: [s.winRate, prev.winRate, 1],
+    payoff: [s.payoff, prev.payoff, 1],
+    score: [s.score, prev.score, 1],
+    drawdown: [s.maxDrawdown, prev.maxDrawdown, -1],
+    hold: [s.medianHoldMin, prev.medianHoldMin, 0],
+    profit: [s.profit, prev.profit, 1],
+    trades: [s.trades, prev.trades, 0],
+  }
+  const [cur, was, good] = pair[kind]
+  if (cur == null || was == null || !Number.isFinite(cur) || !Number.isFinite(was)) return null
+  const d = cur - was
+  const abs = Math.abs(d)
+  const text = kind === 'winRate' ? `${(abs * 100).toFixed(0)}%`
+    : kind === 'payoff' ? abs.toFixed(2)
+      : kind === 'score' || kind === 'trades' ? String(Math.round(abs))
+        : kind === 'hold' ? fmtMinutes(t, abs)
+          : money(abs, false)
+  const flat = kind === 'winRate' ? abs < 0.005 : kind === 'payoff' ? abs < 0.005 : kind === 'hold' ? abs < 0.5 : abs < 0.5
+  if (flat) return { text: '—', cls: 'is-flat' }
+  const cls = good === 0 ? 'is-flat' : (d > 0) === (good > 0) ? 'is-up' : 'is-down'
+  return { text: `${d > 0 ? '▲' : '▼'} ${text}`, cls }
+}
+
+function Delta({ kind, report, label = false }: { kind: DeltaKind; report: PersonaReport; label?: boolean }) {
+  const { t, i18n } = useTranslation()
+  const d = deltaOf(kind, report, t)
+  if (!d || !report.previous) return null
+  const vs = t('persona.compare.vs', { month: monthLabel(report.previous.period, i18n.language) })
+  return (
+    <small className={`pr-delta num ${d.cls} ${label ? 'has-label' : ''}`} title={vs}>
+      {label && <span>{t('persona.compare.short')}</span>}{d.text}
+    </small>
+  )
+}
+
+// 近几个月的综合评分：一条折线，每个月一个点，两头标月份。少于两个月不画。
+// Score across recent months: one line, a dot per month, the first and last month labelled.
+function ScoreTrend({ report }: { report: PersonaReport }) {
+  const { t, i18n } = useTranslation()
+  const trend = report.trend ?? []
+  if (trend.length < 2) return null
+  const X = (i: number) => 4 + (i / (trend.length - 1)) * 92
+  const Y = (v: number) => 26 - (Math.max(0, Math.min(100, v)) / 100) * 22
+  const line = trend.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.score).toFixed(1)}`).join(' ')
+  const label = trend.map((p) => `${monthLabel(p.period, i18n.language)} ${p.score}`).join(', ')
+  return (
+    <figure className="pr-trend" role="img" aria-label={`${t('persona.compare.trend')}: ${label}`}>
+      <figcaption><span>{t('persona.compare.trend')}</span><Delta kind="score" report={report} /></figcaption>
+      <div className="pr-trend-plot">
+        <svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+          <path d={line} />
+        </svg>
+        {trend.map((p, i) => (
+          <span key={p.period} className={`pr-trend-dot ${i === trend.length - 1 ? 'is-now' : ''}`}
+            style={{ left: `${X(i)}%`, top: `${(Y(p.score) / 30) * 100}%` }} title={`${monthLabel(p.period, i18n.language)} · ${p.score}`} />
+        ))}
+      </div>
+      <div className="pr-trend-x" aria-hidden="true">
+        <span>{monthLabel(trend[0].period, i18n.language)} · {trend[0].score}</span>
+        <span>{monthLabel(trend[trend.length - 1].period, i18n.language)} · {trend[trend.length - 1].score}</span>
+      </div>
+    </figure>
+  )
+}
+
+// 一笔单 → 「在图表上看」的链接（路由 state 带过去，不进网址）。读不出开仓时间就不给链接。
+// A trade → the "view on chart" link (carried in router state, not the URL); none without an open time.
+function TradeLink({ trade, className, children }: { trade: PersonaTradeRef | null | undefined; className?: string; children: React.ReactNode }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  if (!trade) return <>{children}</>
+  const open = () => {
+    const focusTrade = focusFromRef(trade)
+    if (focusTrade) navigate('/charts', { state: { focusTrade } })
+  }
+  return (
+    <button type="button" className={`pr-tradelink ${className ?? ''}`} onClick={open} title={t('persona.tags.onChart')} aria-label={`${trade.symbol} ${money(trade.profit)} · ${t('persona.tags.onChart')}`}>
+      {children}
+    </button>
+  )
+}
+
+function MonthReport({ report, canOpen }: { report: PersonaReport; canOpen: boolean }) {
   const { t, i18n } = useTranslation()
   const s = report.summary
   const lang = (i18n.language || 'zh').slice(0, 2) as 'zh' | 'en' | 'ja' | 'th' | 'vi'
@@ -474,19 +619,20 @@ function MonthReport({ report }: { report: PersonaReport }) {
   if (!s.trades) {
     return <div className="pr-slab pr-empty">{t('persona.report.empty')}</div>
   }
-  const facts: { k: string; v: string; cls?: string }[] = [
+  const facts: { k: string; v: string; cls?: string; delta?: DeltaKind }[] = [
     { k: 'avgWin', v: money(s.avgWin), cls: tone(s.avgWin) },
     { k: 'avgLoss', v: money(s.avgLoss == null ? null : -Math.abs(s.avgLoss)), cls: s.avgLoss ? 'is-down' : '' },
-    { k: 'drawdown', v: money(-s.maxDrawdown, false), cls: s.maxDrawdown > 0 ? 'is-down' : '' },
+    { k: 'drawdown', v: money(-s.maxDrawdown, false), cls: s.maxDrawdown > 0 ? 'is-down' : '', delta: 'drawdown' },
   ]
-  const rail: { k: string; v: string; cls?: string }[] = [
-    { k: 'trades', v: String(s.trades) },
-    { k: 'payoff', v: num(s.payoff, 2) },
+  const rail: { k: string; v: string; cls?: string; delta?: DeltaKind; trade?: PersonaTradeRef | null }[] = [
+    { k: 'trades', v: String(s.trades), delta: 'trades' },
+    { k: 'payoff', v: num(s.payoff, 2), delta: 'payoff' },
     { k: 'days', v: t('persona.report.daysValue', { g: s.greenDays, n: s.tradingDays }) },
-    { k: 'hold', v: s.medianHoldMin == null ? EMPTY : fmtMinutes(t, s.medianHoldMin) },
-    { k: 'best', v: money(s.best), cls: tone(s.best) },
-    { k: 'worst', v: money(s.worst), cls: tone(s.worst) },
+    { k: 'hold', v: s.medianHoldMin == null ? EMPTY : fmtMinutes(t, s.medianHoldMin), delta: 'hold' },
+    { k: 'best', v: money(s.best), cls: tone(s.best), trade: canOpen ? report.bestTrade : null },
+    { k: 'worst', v: money(s.worst), cls: tone(s.worst), trade: canOpen ? report.worstTrade : null },
   ]
+  const prevMonth = report.previous ? monthLabel(report.previous.period, i18n.language) : null
   const winShare = s.wins + s.losses ? s.wins / (s.wins + s.losses) : 0
   return (
     <div className="pr-month">
@@ -496,9 +642,10 @@ function MonthReport({ report }: { report: PersonaReport }) {
         <div className="pr-pnl">
           <span className="pr-k">{t('persona.report.stat.profit')}</span>
           <CountMoney value={s.profit} className={`pr-pnl-num ${tone(s.profit)}`} />
+          <Delta kind="profit" report={report} label />
           <dl className="pr-facts">
             {facts.map((x) => (
-              <div key={x.k}><dt>{t(`persona.report.stat.${x.k}`)}</dt><dd className={`num ${x.cls ?? ''}`}>{x.v}</dd></div>
+              <div key={x.k}><dt>{t(`persona.report.stat.${x.k}`)}</dt><dd className={`num ${x.cls ?? ''}`}>{x.v}{x.delta && <Delta kind={x.delta} report={report} />}</dd></div>
             ))}
           </dl>
           <Curve report={report} />
@@ -508,21 +655,35 @@ function MonthReport({ report }: { report: PersonaReport }) {
           <div className="pr-wl">
             <div className="pr-wl-top">
               <span>{t('persona.report.stat.winRate')}</span>
-              <b className="num">{pct(s.winRate)}</b>
+              <b className="num">{pct(s.winRate)}<Delta kind="winRate" report={report} /></b>
             </div>
             <div className="pr-wl-bar" aria-hidden="true">
               <i className="is-win" style={{ flexGrow: Math.max(winShare, 0.02) }} />
               <i className="is-loss" style={{ flexGrow: Math.max(1 - winShare, 0.02) }} />
             </div>
             <p className="pr-wl-sub">{t('persona.report.wl', { w: s.wins, l: s.losses })}</p>
+            <ScoreTrend report={report} />
           </div>
         </div>
         <dl className="pr-rail">
           {rail.map((x) => (
-            <div key={x.k}><dt>{t(`persona.report.stat.${x.k}`)}</dt><dd className={`num ${x.cls ?? ''}`}>{x.v}</dd></div>
+            <div key={x.k}>
+              <dt>{t(`persona.report.stat.${x.k}`)}</dt>
+              <dd className={`num ${x.cls ?? ''}`}>
+                <TradeLink trade={x.trade}>{x.v}</TradeLink>
+                {x.delta && <Delta kind={x.delta} report={report} />}
+              </dd>
+            </div>
           ))}
         </dl>
       </Rv>
+      {prevMonth && <p className="pr-small">{t(report.live ? 'persona.compare.noteLive' : 'persona.compare.note', { month: prevMonth })}</p>}
+      {report.floating && report.floating.count > 0 && (
+        <p className="pr-floating" role="status">
+          <span className="pr-floating-dot" aria-hidden="true" />
+          {t('persona.report.floating', { loss: money(report.floating.loss), n: report.floating.count })}
+        </p>
+      )}
       {report.openLosers > 0 && <p className="pr-small">{t('persona.report.openLosers', { n: report.openLosers })}</p>}
 
       <div className="pr-grid2">
@@ -530,7 +691,7 @@ function MonthReport({ report }: { report: PersonaReport }) {
         <Rv className="pr-panel" i={1}><Breakdowns report={report} /></Rv>
       </div>
 
-      <Rv className="pr-panel"><TagsPanel report={report} /></Rv>
+      <Rv className="pr-panel"><TagsPanel report={report} canOpen={canOpen} /></Rv>
 
       <div className={report.badges.length > 0 ? 'pr-grid2' : 'pr-grid1'}>
         {report.badges.length > 0 && (
@@ -732,7 +893,7 @@ function Breakdowns({ report }: { report: PersonaReport }) {
   )
 }
 
-function TagsPanel({ report }: { report: PersonaReport }) {
+function TagsPanel({ report, canOpen }: { report: PersonaReport; canOpen: boolean }) {
   const { t } = useTranslation()
   const [more, setMore] = useState(false)
   const list = more ? report.taggedTrades : report.taggedTrades.slice(0, TAGGED_SHOWN)
@@ -741,7 +902,7 @@ function TagsPanel({ report }: { report: PersonaReport }) {
     <>
       <div className="pr-panel-head">
         <h3 className="pr-h3">{t('persona.tags.title')}</h3>
-        <p className="pr-small">{t('persona.tags.lead')}</p>
+        <p className="pr-small">{t('persona.tags.lead')}{canOpen && report.taggedTrades.length > 0 ? ` ${t('persona.tags.tapHint')}` : ''}</p>
       </div>
       <div className="pr-tags">
         {TAGS.map((k) => {
@@ -770,6 +931,11 @@ function TagsPanel({ report }: { report: PersonaReport }) {
                   <span className="num pr-dim">{Number(x.volume.toFixed(2))}</span>
                   <span className="num pr-dim">{fmt.format(new Date(x.openAt))}</span>
                   <b className={`num pr-trade-p ${tone(x.profit)}`}>{money(x.profit)}</b>
+                  {canOpen && (
+                    <TradeLink trade={x} className="pr-trade-go">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                    </TradeLink>
+                  )}
                 </div>
                 <div className="pr-trade-tags">
                   {x.unrealized && <span className="pr-mini is-warn">{t('persona.tags.open')}</span>}

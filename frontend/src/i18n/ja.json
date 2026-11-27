@@ -30,7 +30,9 @@
     "lucky_prize_cancelled": "賞品はキャンセルされました",
     "agent_tree_change": "アンバサダーが下位アンバサダーを変更しました",
     "agent_promoted": "アンバサダーになりました。アンバサダーセンターを開いてください",
-    "chart_alert": "チャートアラートが発動しました"
+    "chart_alert": "チャートアラートが発動しました",
+    "persona_report": "取引レポートができました",
+    "persona_changed": "取引レポートができました。取引人格が変わりました"
   },
   "nav": {
     "dashboard": "ホーム",

@@ -67,15 +67,44 @@ export interface PersonaSummary {
   maxDrawdown: number
 }
 
-export interface PersonaTaggedTrade {
+// 一笔单的定位信息：点它能跳到图表上那一段。价格是 2026-11-27 加的，更早存档的报告里没有。
+// Enough of a trade to open the chart on it. Prices were added 2026-11-27; older archives lack them.
+export interface PersonaTradeRef {
   symbol: string
   side: string
   volume: number
   openAt: string
   closeAt: string
+  openPrice?: number | null
+  closePrice?: number | null
   profit: number
   unrealized: boolean
+}
+
+export interface PersonaTaggedTrade extends PersonaTradeRef {
   tags: PersonaTag[]
+}
+
+// 「如果今天结算」的人格（只在当月报告里）：和月底存档同一个算法。
+// The persona "if the month closed today" (live month only), computed like the month-end archive.
+export interface PersonaOutlook {
+  code: string
+  family: PersonaFamily
+  from: string
+  changed: boolean
+  axes: Record<PersonaAxisKey, { letter: string; value: number }>
+}
+
+// 上个月的几项指标，用来画「比上月」的升降。/ Last month's figures for the month-over-month arrows.
+export interface PersonaPrevious {
+  period: string
+  trades: number | null
+  profit: number | null
+  winRate: number | null
+  payoff: number | null
+  score: number | null
+  maxDrawdown: number | null
+  medianHoldMin: number | null
 }
 
 export interface PersonaReport {
@@ -95,6 +124,15 @@ export interface PersonaReport {
   previousCode: string | null
   comment: Partial<Record<'zh' | 'en' | 'ja' | 'th' | 'vi', string>> | null
   archivedAt: string | null
+  // 以下是 2026-11-27 加的，旧版后端 / 旧存档可能没有。/ Added 2026-11-27; may be absent.
+  bestTrade?: PersonaTradeRef | null
+  worstTrade?: PersonaTradeRef | null
+  // 当月：此刻还没计入的浮亏持仓（笔数、合计金额，负数）。/ Live month: floating losers not yet counted.
+  floating?: { count: number; loss: number } | null
+  outlook?: PersonaOutlook | null
+  previous?: PersonaPrevious | null
+  // 最近几个月的综合评分，从早到晚，最后一项是这个月。/ Scores of recent months, oldest first.
+  trend?: { period: string; score: number }[]
 }
 
 export type PersonaOverview =

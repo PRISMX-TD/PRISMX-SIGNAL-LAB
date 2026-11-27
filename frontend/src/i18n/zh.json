@@ -30,7 +30,9 @@
     "lucky_prize_cancelled": "奖品已取消",
     "agent_tree_change": "推荐官调整了下级推荐官",
     "agent_promoted": "你已成为推荐官，点击查看推荐官中心",
-    "chart_alert": "图表警报已触发"
+    "chart_alert": "图表警报已触发",
+    "persona_report": "交易报告出炉了",
+    "persona_changed": "交易报告出炉，你的交易人格变了"
   },
   "nav": {
     "dashboard": "仪表盘",
