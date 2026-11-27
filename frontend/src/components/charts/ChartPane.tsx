@@ -171,7 +171,7 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { sym
         engine.lastTimeRef.current = openT
         engine.renderTail()
         engine.recomputeIndicators()
-        if (engine.isFollowingLiveRef.current) engine.chartRef.current?.timeScale().scrollToRealTime()
+        // 不自动滚回最新：最新一根在屏幕内时图表库自己右移 / no auto scroll-back: the library shifts while the last bar is visible
         return
       }
       // 最后一根已经是好几根之前的了（App 冻在后台刚回来）：别把现价钉到它身上——那会把一根旧蜡烛

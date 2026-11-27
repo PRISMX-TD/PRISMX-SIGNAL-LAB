@@ -333,7 +333,8 @@ export class ReplayController {
         e.renderAll()
       }
       e.recomputeIndicators()
-      if (e.isFollowingLiveRef.current) { try { e.chartRef.current?.timeScale().scrollToRealTime() } catch { /* disposed */ } }
+      // 回放走一根也不自动滚回：最新一根在屏幕内时图表库自己右移，翻到别处就不动
+      // No auto scroll-back per step either: the library shifts while the last bar is visible
       this.bind?.onCursor?.(bar)
       this.set({ cursorTime: bar.t, loading: false })
     } else if (s === 'end') {

@@ -266,6 +266,9 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       recomputeIndicators()
       setDayStats(dayStatsNow())
       chartRef.current?.timeScale().fitContent()
+      // 首帧把最新一根放到右侧留白处（只在载入时做一次，之后不再自动拽回）
+      // First frame: put the latest bar at the right margin (once on load; never pulled back afterwards)
+      chartRef.current?.timeScale().scrollToRealTime()
       setHasData(true)
     }
 
@@ -292,7 +295,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         recomputeIndicators()
         setDayStats(dayStatsNow())
         // 快照已画过就不再 fitContent，免得视窗跳一下。/ Skip refit if the snapshot already framed it.
-        if (!snap) chartRef.current?.timeScale().fitContent()
+        if (!snap) {
+          chartRef.current?.timeScale().fitContent()
+          chartRef.current?.timeScale().scrollToRealTime()
+        }
         setHasData(true)
         saveSnapshot(snapKey, candlesRef.current)
       } else {
@@ -431,8 +437,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         renderAll()
         recomputeIndicators()
         setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
-        if (isFollowingLiveRef.current) chartRef.current?.timeScale().scrollToRealTime()
-        else if (range) chartRef.current?.timeScale().setVisibleLogicalRange(range)
+        // 不再自动滚回最新（2026-11-27 用户要求）：贴着最新时新 K 线由图表库自己右移，离开了就原地不动
+        // No automatic scroll back to live (user request 2026-11-27): at the live edge the library shifts on new
+        // bars by itself; away from it the view stays put
+        if (!isFollowingLiveRef.current && range) chartRef.current?.timeScale().setVisibleLogicalRange(range)
         saveSnapshot(snapKey, candlesRef.current)
         void feed.latest(10).then(handleLatest).catch(() => {})
       }).catch(() => {}).finally(() => {
@@ -484,11 +492,13 @@ export function useChartData(symbol: string, interval: string, digits: number, e
           // 同值不换引用：每 2 秒一轮询，K 线没动时别让报价条与整页白白重渲染。
           // Keep the reference when unchanged, so a quiet 2s poll re-renders nothing.
           setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
-          // 自动跟踪最新 bar：仅在用户未手动离开实时位置时跟随滚动
-          // Auto-follow the latest bar only when the user hasn't scrolled away
-          if (isFollowingLiveRef.current) {
-            chartRef.current?.timeScale().scrollToRealTime()
-          }
+          // 不再每次轮询 scrollToRealTime（2026-11-27 用户要求取消「自动回到最新」）：以前离最新 3 根以内、
+          // 或往右空白区拖得不远，2 秒内就被拽回去。现在只靠图表库的 shiftVisibleRangeOnNewBar——最新一根
+          // 在屏幕内时新 K 线自动右移跟随，翻到别处就停在那里，回去靠右下角「回到最新」按钮。
+          // No scrollToRealTime on every poll any more (user asked to drop the automatic "back to latest",
+          // 2026-11-27): within 3 bars of live, or a short drag into the right margin, used to be yanked back
+          // within 2 s. Following now relies on the library's shiftVisibleRangeOnNewBar — while the latest bar
+          // is on screen new bars scroll in; anywhere else the view stays, and the » button brings it back.
         }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
