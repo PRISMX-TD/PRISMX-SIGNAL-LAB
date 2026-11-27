@@ -38,6 +38,7 @@ import DrawFavoritesBar from './draw/DrawFavoritesBar'
 import { syncDrawingAlerts } from './alert/alertStore'
 import { drawingAlertable } from './alert/model'
 import { hideLoupe, showLoupe } from './ChartLoupe'
+import { useMediaQuery } from '../../utils/useMediaQuery'
 
 export type { Tool, MagnetMode } from './draw/model'
 
@@ -1361,8 +1362,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     setPref(CHART_PREFS_NS, 'drawTpl', { ...templates, [type]: (templates[type] ?? []).filter((x) => x.name !== name) })
   }, [templates, setPref])
 
-  // 收藏栏位置 / favourites bar position
-  const favPos = getPref<{ x: number; y: number } | null>(CHART_PREFS_NS, 'drawFavPos', null)
+  // 收藏栏位置：电脑和手机各记各的（屏幕大小差太多，共用一个位置两边都别扭）；手机键没有值就用默认位置
+  // Favourites bar position: desktop and phone each keep their own (screens differ too much to share one);
+  // an empty phone key means the default placement
+  const favPhone = useMediaQuery('(max-width: 767px)')
+  const favKey = favPhone ? 'drawFavPosM' : 'drawFavPos'
+  const favPos = getPref<{ x: number; y: number } | null>(CHART_PREFS_NS, favKey, null)
 
   const selDrawings = useMemo(() => {
     const ids = new Set(sel)
@@ -1429,7 +1434,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           tool={tool}
           onPick={setTool}
           pos={favPos}
-          onPos={(p) => setPref(CHART_PREFS_NS, 'drawFavPos', p)}
+          onPos={(p) => setPref(CHART_PREFS_NS, favKey, p)}
           host={host}
           t={t}
         />

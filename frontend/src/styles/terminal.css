@@ -1327,6 +1327,33 @@
   .term-qs-acts .term-tbr-btn { height: 30px; padding: 0 11px; gap: 5px; font-size: 12px; }
   .term-qs-acts .term-tool-btn { width: 30px; height: 30px; box-shadow: inset 0 0 0 1px var(--line-hi); border-radius: var(--r-tile); }
   .term-qs-acts .term-tool-btn.on { box-shadow: none; }
+  /* 「更多」：三个点，回放 / 对比开着时右上角一个小紫点。
+     "More": three dots, with a small violet dot while replay or compare is on. */
+  .term-qs-acts { position: relative; }
+  .term-qs-acts .term-more-btn { position: relative; width: 30px; padding: 0; justify-content: center; }
+  .term-more-btn.dot::after {
+    content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--purple-hi);
+  }
+  .term-more-menu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+    min-width: 176px; padding: 4px; display: flex; flex-direction: column;
+    border: 1px solid var(--line-hi); border-radius: 10px;
+    background: var(--surface-float); box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  }
+  .term-more-it {
+    display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px;
+    border: 0; border-radius: 7px; background: none; color: var(--text);
+    font-size: 13px; text-align: left; white-space: nowrap; cursor: pointer;
+  }
+  .term-more-it > svg, .term-more-it > span:first-child { flex-shrink: 0; color: var(--text-3); }
+  .term-more-it:active { background: var(--surface); }
+  .term-more-it.on { color: var(--purple-hi); }
+  .term-more-it.on > svg { color: inherit; }
+  .term-more-it .cmp-count { margin-left: auto; font-style: normal; font-size: 11px; color: var(--purple-hi); }
+  .term-more-it.pro { color: var(--purple-hi); }
+  .term-more-it.pro > svg { color: inherit; }
+  .term-more-sep { height: 1px; margin: 4px 8px; background: var(--line); }
 }
 /* 320 宽的小屏（老 iPhone SE）：大价格收一号，品种名、统计、8 位价格才能同排放下。
    320px phones (first-gen iPhone SE): one size down on the price so symbol, stats and an 8-digit price share the row. */

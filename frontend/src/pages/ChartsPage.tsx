@@ -348,6 +348,19 @@ export default function ChartsPage() {
   // close them first rather than leaving the page (see useBackToClose).
   useBackToClose(settingsOpen, () => setSettingsOpen(false))
   useBackToClose(sheet != null, () => setSheet(null))
+  // 手机报价条第二行的「更多」菜单（对比 / 回放 / 数据窗口 / 图表设置 / 专业版）。
+  // Phone tools-row "More" menu (compare / replay / data window / chart settings / pro).
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLDivElement>(null)
+  useBackToClose(moreOpen, () => setMoreOpen(false))
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [moreOpen])
 
   // 桌面三栏 / 手机「图表 + 抽屉」的分界，与 terminal.css 的 1024px 断点同一条线。
   // 两边互相看不见的部分不再挂载：手机上的左右栏与停靠区，桌面上的交易条与抽屉。
@@ -1010,17 +1023,19 @@ export default function ChartsPage() {
     ? <LayoutMenu variant={variant} grid={cg.grid} onGrid={setGrid} sync={cg.sync} onSync={setSync} api={layouts} onToast={showToast} />
     : null
 
-  // 手机报价条第二行：左边约 2/3 是常驻的画线工具横条（左右滑动看全部工具），
-  // 右边是「指标」和设置齿轮（设置里含显示持仓开关）。底部工具条只留周期与持仓，一行放得下。
-  // The mobile quote strip's second row: the left ~2/3 is the always-on draw-tools bar
-  // (swipe sideways for every tool); the right holds Indicators and the settings gear (which
-  // has the show-positions switch). The bottom toolbar keeps only intervals + positions.
+  // 手机报价条第二行：左边是常驻的画线工具横条（左右滑动看全部工具），右边只留最常用的
+  // 「指标」「警报」和一个「更多」——对比、回放、数据窗口、图表设置、专业版收进「更多」菜单。
+  // 以前七个按钮全摆出来，画线横条被挤得只剩一个工具（2026-11-27 负责人截图）。
+  // The mobile quote strip's second row: the always-on draw-tools bar on the left (swipe for every
+  // tool); the right keeps only Indicators, Alerts and a "More" menu holding compare, replay, data
+  // window, chart settings and the pro terminal. Showing all seven used to squeeze the draw bar to one tool.
+  const replayOn = !!info.replay && (info.replay.active || info.replay.selecting)
   const mobileTools = (
     <>
       <div className="term-qs-draw">
         {drawReady && <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
       </div>
-      <div className="term-qs-acts">
+      <div className="term-qs-acts" ref={moreRef}>
         <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn" aria-label={String(t('charts.indicators.button'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
           {t('charts.indicators.short')}
@@ -1029,15 +1044,28 @@ export default function ChartsPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z" /><path d="M10 21h4" /></svg>
           {activeAlertCount > 0 && <b>{activeAlertCount}</b>}
         </button>
-        {compareBtn('term-tbr-btn')}
-        {replayBtn('term-tbr-btn')}
-        <button type="button" onClick={() => setSheet('data')} className="term-tbr-btn" aria-label={String(t('charts.pro.w.data'))} title={String(t('charts.pro.w.data'))}>
-          <IcData size={14} />
+        {/* 回放进行中 / 有对比品种时「更多」上带个点，免得收进菜单后看不出开着 / a dot while replay or compare is on */}
+        <button type="button" onClick={() => setMoreOpen((v) => !v)} className={`term-tbr-btn term-more-btn ${replayOn || activeCompare.length > 0 ? 'dot' : ''}`}
+          aria-haspopup="menu" aria-expanded={moreOpen} aria-label={String(t('charts.ind.ui.more'))} title={String(t('charts.ind.ui.more'))}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M5 12h.01M12 12h.01M19 12h.01" /></svg>
         </button>
-        <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
-        <button type="button" onClick={() => setLayout('pro')} className="term-tbr-btn pt-entry" aria-label={String(t('charts.pro.enter'))} title={String(t('charts.pro.enter'))}>
-          <IcSpark size={13} />{t('charts.pro.short')}
-        </button>
+        {moreOpen && (
+          <div className="term-more-menu" role="menu" onClick={() => setMoreOpen(false)}>
+            {compareBtn('term-more-it', true)}
+            {replayBtn('term-more-it', true)}
+            <button type="button" role="menuitem" onClick={() => setSheet('data')} className="term-more-it">
+              <IcData size={15} /><span>{t('charts.pro.w.data')}</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => setChartSetOpen(true)} className="term-more-it">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" /><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z" /></svg>
+              <span>{t('charts.settings.title')}</span>
+            </button>
+            <span className="term-more-sep" />
+            <button type="button" role="menuitem" onClick={() => setLayout('pro')} className="term-more-it pro">
+              <IcSpark size={14} /><span>{t('charts.pro.enter')}</span>
+            </button>
+          </div>
+        )}
       </div>
     </>
   )
