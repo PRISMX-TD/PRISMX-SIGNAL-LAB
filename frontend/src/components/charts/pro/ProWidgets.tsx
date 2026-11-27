@@ -7,7 +7,7 @@
 // account) · alerts (list with inline stop / resume switches) · data window (OHLC / compare /
 // indicator values at the crosshair bar, phase 6) · object tree (the active chart's drawings, phase 6). Clicking the active icon again
 // collapses the panel and widens the chart; the width is saved on release only.
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ChartAlert } from '../../../api/types'
 import { useGlobalQuote } from '../../../store/live'
@@ -17,7 +17,7 @@ import { EMPTY } from '../../../utils/format'
 import Switch from '../../Switch'
 import { splitPrice, type DayStats } from '../SymbolHeader'
 import { setAlertActive, useChartAlerts } from '../alert/alertStore'
-import { PANEL_MAX, PANEL_MIN, type ProWidget } from './proPrefs'
+import { PANEL_MAX, PANEL_MIN, useProPrefs, type ProWidget } from './proPrefs'
 import { IcBell, IcClose, IcData, IcDock, IcKeyboard, IcList, IcPlus, IcTrade, IcTree } from './icons'
 import { tzOffsetSec } from '../chartTime'
 import { convertSessions, fmtMin, useChartSpec, useSymbolSessions } from './symbolMeta'
@@ -210,6 +210,15 @@ function ProSymbolMeta({ symbol, timezone }: { symbol: string; timezone: string 
   const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
   const { data: sess } = useSymbolSessions(symbol || null)
   const { data: spec } = useChartSpec(symbol || null)
+  // 两段的展开 / 收起记在专业版偏好里（跨刷新、跟账户走）。onToggle 在 React 改 open 属性时也会触发，
+  // 值相同就不写，偏好晚到时不会回写一遍。
+  // Each section's open state lives in the pro prefs (survives reloads, follows the account). onToggle also
+  // fires when React sets `open`, so an unchanged value is not written back when the prefs arrive late.
+  const [proPrefs, updatePro] = useProPrefs()
+  const onMetaToggle = (key: 'metaSess' | 'metaSpec') => (e: SyntheticEvent<HTMLDetailsElement>) => {
+    const open = e.currentTarget.open
+    if (open !== proPrefs[key]) updatePro({ [key]: open })
+  }
   const offMin = Math.round(tzOffsetSec(timezone, Date.now() / 1000) / 60)
   const segs = useMemo(
     () => (sess?.known && sess.serverUtcOffsetSec != null ? convertSessions(sess.sessions, sess.serverUtcOffsetSec, offMin) : null),
@@ -242,7 +251,7 @@ function ProSymbolMeta({ symbol, timezone }: { symbol: string; timezone: string 
   if (!symbol) return null
   return (
     <>
-      <details className="pt-meta" open>
+      <details className="pt-meta" open={proPrefs.metaSess} onToggle={onMetaToggle('metaSess')}>
         <summary className="pt-meta-hd">
           <h3>{tt('charts.pro.meta.sessions')}</h3>
           {sess?.known && sess.openNow != null && (
@@ -268,7 +277,7 @@ function ProSymbolMeta({ symbol, timezone }: { symbol: string; timezone: string 
           </>
         )}
       </details>
-      <details className="pt-meta" open>
+      <details className="pt-meta" open={proPrefs.metaSpec} onToggle={onMetaToggle('metaSpec')}>
         <summary className="pt-meta-hd"><h3>{tt('charts.pro.meta.spec')}</h3></summary>
         {specRows.length === 0 ? <p className="pt-meta-dim">{EMPTY}</p> : (
           <dl className="pt-meta-spec">

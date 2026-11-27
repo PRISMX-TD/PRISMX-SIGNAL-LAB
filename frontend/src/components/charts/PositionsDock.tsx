@@ -23,6 +23,7 @@ import SymbolLogo from './pro/SymbolLogo'
 import DockHistory from './DockHistory'
 import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
+import { useBackToClose } from '../../utils/useBackToClose'
 import PendingEditor, { type PendingEdit } from './PendingEditor'
 import { onRovingKeyDown } from '../../utils/rovingTabs'
 import { useFirstReveal } from '../../utils/useFirstReveal'
@@ -106,6 +107,9 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
   const [tab, setTab] = useState<Tab>(initialTab)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
+  // 平仓 / 全部平仓 / 撤单确认接返回手势：返回 = 取消，不越过它收起抽屉
+  // The close / close-all / cancel confirm claims back: back = keep, not past it to the sheet
+  useBackToClose(pending != null, () => setPending(null))
   // 展开做部分平仓 / 改止损止盈的仓位 ticket，及其表单值 / expanded position for
   // partial-close / modify, plus its form values
   const [expanded, setExpanded] = useState<number | null>(null)

@@ -26,6 +26,10 @@ export interface ProPrefs {
   // 自选表显示哪些列：趋势格、最新价 / which watchlist columns show: trend cells, last price
   wlTrend: boolean
   wlPrice: boolean
+  // 品种详情卡里「交易时段」「合约规格」两段是否展开（收起后刷新也记得）
+  // Whether the symbol card's sessions / spec sections are expanded (a collapse survives a reload)
+  metaSess: boolean
+  metaSpec: boolean
 }
 
 export const PANEL_MIN = 260
@@ -42,6 +46,8 @@ export const DEFAULT_PRO_PREFS: ProPrefs = {
   focus: false,
   wlTrend: true,
   wlPrice: true,
+  metaSess: true,
+  metaSpec: true,
 }
 
 const clamp = (v: unknown, d: number, lo: number, hi: number) =>
@@ -59,6 +65,8 @@ export function normalizeProPrefs(raw: unknown): ProPrefs {
     focus: typeof r.focus === 'boolean' ? r.focus : d.focus,
     wlTrend: typeof r.wlTrend === 'boolean' ? r.wlTrend : d.wlTrend,
     wlPrice: typeof r.wlPrice === 'boolean' ? r.wlPrice : d.wlPrice,
+    metaSess: typeof r.metaSess === 'boolean' ? r.metaSess : d.metaSess,
+    metaSpec: typeof r.metaSpec === 'boolean' ? r.metaSpec : d.metaSpec,
   }
 }
 

@@ -1158,6 +1158,8 @@ export default function ChartsPage() {
   const { lastVolume } = useLastVolume()
   const [drawOrder, setDrawOrder] = useState<{ req: ChartPlaceReq; symbol: string; decimals: number } | null>(null)
   const [drawOrderBusy, setDrawOrderBusy] = useState(false)
+  // 画线下单确认接返回手势（下单在途时不响应）/ the draw-order confirm claims back (ignored while placing)
+  useBackToClose(drawOrder != null && !drawOrderBusy, () => setDrawOrder(null))
   const placeDrawOrder = useCallback(async (job: { req: ChartPlaceReq; symbol: string; decimals: number }) => {
     setDrawOrderBusy(true)
     const placed = await chartPlace(job.symbol, job.req)

@@ -76,6 +76,8 @@ export default function ProDrawRail(p: Props) {
   const [open, setOpen] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<RemoveMode | null>(null)
   useBackToClose(open != null, () => setOpen(null))
+  // 「移除画线 / 指标」确认也接返回手势 / the remove-drawings / indicators confirm claims back too
+  useBackToClose(confirm != null, () => setConfirm(null))
   const refs = useRef<Record<string, HTMLElement | null>>({})
   const dl = drawLayerRef.current
   const cur = dl?.tool ?? 'cursor'
