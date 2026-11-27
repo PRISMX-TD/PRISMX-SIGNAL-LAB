@@ -665,8 +665,10 @@ export function useChartEngine(
         vertLines: { color: pal?.grid ?? 'rgba(255, 255, 255, 0.045)' },
         horzLines: { color: pal?.grid ?? 'rgba(255, 255, 255, 0.045)' },
       },
-      rightPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)' },
-      leftPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)', visible: false },
+      // entireTextOnly：贴着窗格上下边、会被切掉半截的刻度字不画——主图底和副图顶的两个刻度以前会叠在一起
+      // entireTextOnly: skip edge tick labels that would be cut off — the main pane's bottom and a sub-pane's top label used to overlap
+      rightPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)', entireTextOnly: true },
+      leftPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)', visible: false, entireTextOnly: true },
       timeScale: {
         borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)',
         timeVisible: true,
@@ -939,7 +941,7 @@ export function useChartEngine(
       if (scaleIdOf(inst, def) === 'none' || scaleIdOf(inst, def).startsWith('ind-')) {
         // 自己的价格轴：叠在主图的副图指标贴底，占下面四分之一 / own scale: oscillators on main hug the bottom quarter
         const first = plots[0]?.api
-        if (first) first.priceScale().applyOptions({ scaleMargins: inst.pane === 'main' && !def.overlay ? { top: 0.75, bottom: 0 } : { top: 0.1, bottom: 0.1 } })
+        if (first) first.priceScale().applyOptions({ entireTextOnly: true, scaleMargins: inst.pane === 'main' && !def.overlay ? { top: 0.75, bottom: 0 } : { top: 0.1, bottom: 0.1 } })
       }
       if (scaleIdOf(inst, def) === 'left') anyLeft = true
       const host: ISeriesApi<SeriesType> = plots[0]?.api ?? main

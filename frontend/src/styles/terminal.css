@@ -269,6 +269,7 @@
   color: var(--text-strong);
 }
 .term-qs-id p { margin: 4px 0 0; font-size: 12px; color: var(--text-3); }
+.term-qs-chg-m { display: none; }
 .term-qs-px {
   display: flex;
   align-items: center;
@@ -1278,6 +1279,27 @@
      Both sides flex equally so the stats block sits centred between symbol and price. */
   .term-qs-id { order: 1; flex: 1 1 0; }
   .term-qs-px { flex: 1 1 0; }
+  /* 第一行改成三列网格：品种列可收缩（太窄时品种名出省略号），统计、价格按内容宽——永远一行，
+     不再出现等分把品种名压到统计上的重叠；第二行工具条横跨三列。手机不画品种图标（下面 svg 那条
+     特异性更高，以前把 display:none 盖掉了），给旧手机 / 小屏省出位置。
+     Row 1 is a three-column grid: the symbol column shrinks (its name ellipsises when tight), stats and
+     price take their content width — always one row, no more equal-flex overlap of the symbol onto the
+     stats; the tools row spans all three. No symbol logo on phones (the svg rule below is more specific
+     and used to override the display:none), saving room on old / small phones. */
+  .term-qs { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+  .term-qs-tools { grid-column: 1 / -1; }
+  .term-qs-id .sym-ava, .term-qs-id svg.sym-ava { display: none; }
+  .term-qs-id h2 { min-width: 0; font-size: 16px; }
+  .term-qs-id h2 > svg { flex-shrink: 0; }
+  .term-qs-sym { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 再减一层：品种名下面换成涨跌幅，价格列只剩大价格；点差（底部交易条有）和「涨跌」两个字都不显示。
+     One layer less: the change % sits under the symbol, the price column is just the price; the spread
+     (in the bottom trade bar) and the "change" label are dropped. */
+  .term-qs-id .term-qs-sub, .term-chg { display: none; }
+  .term-qs-chg-m { display: block; margin: 4px 0 0; font: 500 12px var(--font-mono); color: var(--text-3); }
+  .term-qs-chg-m.up { color: var(--up); }
+  .term-qs-chg-m.down { color: var(--down); }
+  .term-qs-px { justify-content: center; }
   .term-qs-st {
     order: 2; flex: none; flex-direction: column; align-items: stretch; justify-content: center;
     gap: 4px; padding: 12px 12px 0; overflow: visible;
@@ -2965,6 +2987,18 @@
 .indx-tplsave { display: flex; gap: 8px; margin-bottom: 8px; }
 .indx-tplsave .ind-in { flex: 1; width: auto; text-align: left; font-family: var(--font-sans); }
 .indx-tplsave .ind-btn { height: 34px; padding: 0 16px; }
+/* 加重复指标前的确认：贴在那一行下面，占满整行 / the duplicate-add check, full width under its row */
+.indx-dup {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 8px 8px; padding: 8px 8px 8px 12px;
+  border-radius: var(--r-md);
+  background: rgb(var(--purple-rgb) / 0.1);
+  font-size: 12px; color: var(--text);
+}
+.indx-dup span { flex: 1 1 160px; min-width: 0; }
+.indx-dup .ind-btn { height: 30px; padding: 0 12px; }
+.indx-dup .ind-btn.primary { margin-left: 0; padding: 0 14px; }
 .indx-trow { display: flex; align-items: center; gap: 4px; border-radius: var(--r-md); }
 @media (hover: hover) and (pointer: fine) {
   .indx-trow:hover { background: rgba(255, 255, 255, 0.03); }
@@ -3278,6 +3312,21 @@
   .inde .ind-ft { padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
   .inde .ind-btn { padding: 0 14px; }
   .term-legend.indl { max-width: calc(100% - 64px); }
+  /* 手机主图图例：开关在第一行，行放进限高滚动框（max-height 由组件按主图一半算），框里竖划 = 滚动。
+     Phone main legend: the toggle on the first line, rows in a capped scroll box (max-height = half the
+     main pane, set inline); a vertical swipe in the box scrolls it. */
+  .term-legend.indl.m { gap: 4px; }
+  .indl-fold.m { margin-top: 0; height: 24px; padding: 0 6px 0 8px; gap: 4px; font: 500 12px var(--font-sans); color: var(--text-2); }
+  .indl-box {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    max-width: 100%; overflow-y: auto; overscroll-behavior: contain;
+    pointer-events: auto; touch-action: pan-y;
+  }
+  .indl-box .indl-nm { touch-action: pan-y; }
+  .term-legend.indl.m > .indl-menu { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+  .term-legend.indl.m > .indl-menu button { flex-shrink: 0; }
+  .term-legend.indl.m > .indl-menu .indl-sep { flex-shrink: 0; }
+  .indl-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .indx-it.flash { transition: none; }

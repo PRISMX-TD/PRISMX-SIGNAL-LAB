@@ -4,7 +4,7 @@
 // 买卖价来自全站统一报价（EA 推送，见 store/live 的 useGlobalQuotes），日内
 // 高低与涨跌幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）。
 // 大价格用外汇的「大手 + 点位」写法：1.16 小 · 23 大 · 8 上标（见 splitPrice）。
-// 手机端压成两行：第一行 品种（可点，弹自选抽屉）· 点差/日内高低（竖排小字）· 大价格；
+// 手机端压成两行：第一行 品种（可点，弹自选抽屉，下面一行是涨跌幅）· 日内高低（竖排小字）· 大价格；
 // 第二行是可左右滑动的画线横条 + 指标 / 设置按钮，卖价 / 买价交给底部交易条。
 // The strip docked above the chart: symbol + big price + bid/ask/spread/day
 // range + live state. Bid/ask come from the site-wide quote feed; day stats
@@ -106,10 +106,12 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
         <SymbolLogo symbol={symbol} size={30} className="sym-ava" />
         <div>
           <h2>
-            {symbol || EMPTY}
+            <span className="term-qs-sym">{symbol || EMPTY}</span>
             <svg className="lg:hidden" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </h2>
-          <p>{symbol ? `${displaySymbol(symbol)} · ${ivLabel}` : ''}</p>
+          <p className="term-qs-sub">{symbol ? `${displaySymbol(symbol)} · ${ivLabel}` : ''}</p>
+          {/* 手机：品种名下面直接放涨跌幅，代替「全名 · 周期」（周期在周期条上）/ phones: the change sits under the symbol instead of "name · interval" */}
+          <p className={`term-qs-chg-m num ${changePct == null ? '' : up ? 'up' : 'down'}`}>{changeStr}</p>
         </div>
       </button>
 
@@ -143,7 +145,8 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
             On mobile the bottom trade bar already shows sell / buy, so these two are desktop-only. */}
         <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="down" desktopOnly />
         <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="up" desktopOnly />
-        <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? EMPTY : String(spread)} />
+        {/* 点差手机上也不显示：底部交易条卖 / 买中间已经有 / spread is desktop-only too: the bottom trade bar shows it */}
+        <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? EMPTY : String(spread)} desktopOnly />
         <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
         <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
       </div>

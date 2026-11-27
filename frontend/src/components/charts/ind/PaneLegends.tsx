@@ -8,6 +8,10 @@
 // save as default, remove. Dragging the name onto another pane moves it there.
 // Pane buttons (top-right of a sub-pane): up, down, maximise / restore, collapse / expand,
 // delete; the main pane only gets maximise when sub-panes exist.
+// 手机（<768px）：主图图例第一行是「指标 N」开关（没点过时超过 3 个自动收起），展开后最多占主图一半高、框内滚动；
+// 行写成紧凑的「● EMA20 值」。Phones (<768px): the main legend's first line is an "Indicators N" toggle
+// (auto-folded past 3 until the viewer picks), open rows are capped at half the main pane and scroll;
+// rows read compactly as "● EMA20 value".
 import { memo, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLegend, type LegendStore } from '../legendStore'
@@ -18,6 +22,7 @@ import { defOf } from './registry'
 import { instArgs, plotStyle, resolveColor } from './style'
 import type { IndDef, IndInstance, IndLayout, ScalePin } from './types'
 import { useBackToClose } from '../../../utils/useBackToClose'
+import { useMediaQuery } from '../../../utils/useMediaQuery'
 
 export interface LegendActions {
   toggleHidden: (uid: string) => void
@@ -64,6 +69,12 @@ const I = {
 const FOLD_KEY = 'prismx_indl_fold'
 const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === '1' } catch { return false } }
 const writeFold = (v: boolean) => { try { localStorage.setItem(FOLD_KEY, v ? '1' : '0') } catch { /* 无痕模式等 / private mode etc. */ } }
+// 手机单独一份：没点过就按个数自动（主图超过 3 个默认收起），点过就照用户的来
+// Phones keep their own: untouched means automatic (folded past 3 main-pane rows), otherwise the viewer's choice
+const FOLD_KEY_M = 'prismx_indl_fold_m'
+const AUTO_FOLD_OVER = 3
+const readFoldM = (): boolean | null => { try { const v = localStorage.getItem(FOLD_KEY_M); return v === '1' ? true : v === '0' ? false : null } catch { return null } }
+const writeFoldM = (v: boolean) => { try { localStorage.setItem(FOLD_KEY_M, v ? '1' : '0') } catch { /* 无痕模式等 / private mode etc. */ } }
 
 const Ico = ({ d }: { d: JSX.Element }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
@@ -93,6 +104,13 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
   const rootRef = useRef<HTMLDivElement>(null)
   const [fold, setFoldState] = useState(readFold)
   const setFold = (v: boolean) => { setFoldState(v); writeFold(v) }
+  const phone = useMediaQuery('(max-width: 767px)')
+  const [foldM, setFoldMState] = useState(readFoldM)
+  const setFoldM = (v: boolean) => { setFoldMState(v); writeFoldM(v) }
+  // 手机主图的行放在限高滚动框里，「更多」菜单挪到框外（框里会被裁掉），top 按点开时那一行算
+  // Phone main-pane rows sit in a capped scroll box; the "more" menu renders outside it (it'd be clipped), placed under the row
+  const [menuTop, setMenuTop] = useState(0)
+  const [menuMax, setMenuMax] = useState(320)
 
   useEffect(() => {
     if (!menu && !active) return
@@ -131,9 +149,18 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
       const y = ev.clientY - top
       setDrag({ uid, y, target: paneAt(y) })
     }
+    // 手机滚动框里竖着划会被浏览器拿去滚动（pointercancel），这时只收拾监听、不算拖动
+    // In the phone scroll box a vertical swipe becomes a scroll (pointercancel): clean up, no move
+    const cancel = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      setDrag(null)
+    }
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
       if (!moving) return
       setDrag(null)
       const y = ev.clientY - top
@@ -148,16 +175,49 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
   }
 
-  const row = (inst: IndInstance) => {
+  const menuFor = (inst: IndInstance, def: IndDef, style?: { top: number; maxHeight: number }) => {
+    const idx = paneIds.indexOf(inst.pane)
+    const go = (fn: () => void) => () => { fn(); setMenu(null); setActive(null) }
+    const pin = inst.scale ?? (inst.pane === 'main' && !def.overlay ? 'none' : 'right')
+    const items: JSX.Element[] = [
+      <button key="set" type="button" role="menuitem" onClick={go(() => actions.settings(inst.uid))}>{t('charts.ind.ui.settings')}…</button>,
+      <button key="dup" type="button" role="menuitem" onClick={go(() => actions.duplicate(inst.uid))}>{t('charts.ind.ui.duplicate')}</button>,
+    ]
+    if (def.plots.length > 0) {
+      items.push(<span key="s1" className="indl-sep" />)
+      if (inst.pane !== 'main') items.push(<button key="mm" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: 'main' }))}>{t('charts.ind.ui.moveMain')}</button>)
+      if (idx > 1) items.push(<button key="mu" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: paneIds[idx - 1] }))}>{t('charts.ind.ui.movePaneUp')}</button>)
+      if (idx >= 0 && idx < paneIds.length - 1) items.push(<button key="md" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: paneIds[idx + 1] }))}>{t('charts.ind.ui.movePaneDown')}</button>)
+      const at = inst.pane === 'main' ? 0 : layout.panes.findIndex((p) => p.id === inst.pane)
+      if (inst.pane !== 'main') items.push(<button key="na" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { newPaneAt: at }))}>{t('charts.ind.ui.moveNewAbove')}</button>)
+      items.push(<button key="nb" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { newPaneAt: inst.pane === 'main' ? 0 : at + 1 }))}>{t('charts.ind.ui.moveNewBelow')}</button>)
+      items.push(<span key="s2" className="indl-sep" />)
+      for (const s of ['right', 'left', 'none'] as const) {
+        items.push(<button key={`p${s}`} type="button" role="menuitemradio" aria-checked={pin === s} className={pin === s ? 'chk' : ''} onClick={go(() => actions.scale(inst.uid, s))}>{t(`charts.ind.ui.scale_${s}`)}</button>)
+      }
+    }
+    items.push(<span key="s3" className="indl-sep" />)
+    items.push(<button key="def" type="button" role="menuitem" onClick={go(() => actions.saveDefault(inst.uid))}>{t('charts.ind.ui.saveDefault')}</button>)
+    items.push(<button key="rm" type="button" role="menuitem" className="danger" onClick={go(() => actions.remove(inst.uid))}>{t('charts.ind.ui.remove')}</button>)
+    return <span className="indl-menu" role="menu" style={style} onClick={(e) => e.stopPropagation()}>{items}</span>
+  }
+
+  // inBox = 手机主图滚动框里的行：菜单不在行内渲染 / inBox = a row in the phone main-pane scroll box: its menu renders outside
+  const row = (inst: IndInstance, inBox = false) => {
     const def = defOf(inst.type)
     if (!def) return null
     const vals = legend[inst.uid] ?? {}
-    const args = instArgs(def, inst, srcName)
+    // 手机紧凑行：「● EMA20 3571.74」——没改过的数据源不写，颜色点标出是哪条线
+    // Compact phone rows: "● EMA20 3571.74" — an unchanged source is dropped, a dot shows the line's colour
+    const args = instArgs(def, inst, srcName, phone)
+    const glue = phone && /^\d+(\.\d+)?$/.test(args)
     const tf = inst.tf ? ` · ${inst.tf}` : ''
     const on = active === inst.uid || menu === inst.uid
-    const idx = paneIds.indexOf(inst.pane)
+    const firstPlot = phone ? def.plots.find((p) => !p.noLegend && !p.shape) : undefined
+    const dot = firstPlot ? (() => { const st = plotStyle(inst, firstPlot); return resolveColor(firstPlot.colors ? st.colors[0] : st.color, candle) })() : null
     return (
       <div key={inst.uid} className={`indl-row ${inst.hidden ? 'off' : ''} ${on ? 'on' : ''} ${drag?.uid === inst.uid ? 'dragging' : ''}`}
         onClick={() => setActive((a) => (a === inst.uid ? null : inst.uid))}
@@ -166,7 +226,8 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); actions.remove(inst.uid) } }}>
         <span className="indl-nm" onPointerDown={(e) => startDrag(e, inst.uid)} title={String(t('charts.ind.ui.dragHint'))}>
-          {def.abbr}{args && <span className="indl-args"> {args}</span>}{tf}
+          {dot && <i className="indl-dot" style={{ background: dot }} aria-hidden="true" />}
+          {def.abbr}{args && <span className="indl-args">{glue ? '' : ' '}{args}</span>}{tf}
         </span>
         {!inst.hidden && def.plots.filter((p) => !p.noLegend).map((p) => {
           const st = plotStyle(inst, p)
@@ -181,37 +242,23 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
           <button type="button" aria-label={String(t(inst.hidden ? 'charts.ind.ui.show' : 'charts.ind.ui.hide'))} onClick={() => actions.toggleHidden(inst.uid)}><Ico d={inst.hidden ? I.eyeOff : I.eye} /></button>
           <button type="button" aria-label={String(t('charts.ind.ui.settings'))} onClick={() => actions.settings(inst.uid)}><Ico d={I.gear} /></button>
           <button type="button" aria-label={String(t('charts.ind.ui.remove'))} onClick={() => actions.remove(inst.uid)}><Ico d={I.x} /></button>
-          <button type="button" aria-label={String(t('charts.ind.ui.more'))} aria-expanded={menu === inst.uid} onClick={() => setMenu((m) => (m === inst.uid ? null : inst.uid))}><Ico d={I.more} /></button>
-        </span>
-        {menu === inst.uid && (
-          <span className="indl-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-            {(() => {
-              const go = (fn: () => void) => () => { fn(); setMenu(null); setActive(null) }
-              const pin = inst.scale ?? (inst.pane === 'main' && !def.overlay ? 'none' : 'right')
-              const items: JSX.Element[] = [
-                <button key="set" type="button" role="menuitem" onClick={go(() => actions.settings(inst.uid))}>{t('charts.ind.ui.settings')}…</button>,
-                <button key="dup" type="button" role="menuitem" onClick={go(() => actions.duplicate(inst.uid))}>{t('charts.ind.ui.duplicate')}</button>,
-              ]
-              if (def.plots.length > 0) {
-                items.push(<span key="s1" className="indl-sep" />)
-                if (inst.pane !== 'main') items.push(<button key="mm" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: 'main' }))}>{t('charts.ind.ui.moveMain')}</button>)
-                if (idx > 1) items.push(<button key="mu" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: paneIds[idx - 1] }))}>{t('charts.ind.ui.movePaneUp')}</button>)
-                if (idx >= 0 && idx < paneIds.length - 1) items.push(<button key="md" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { pane: paneIds[idx + 1] }))}>{t('charts.ind.ui.movePaneDown')}</button>)
-                const at = inst.pane === 'main' ? 0 : layout.panes.findIndex((p) => p.id === inst.pane)
-                if (inst.pane !== 'main') items.push(<button key="na" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { newPaneAt: at }))}>{t('charts.ind.ui.moveNewAbove')}</button>)
-                items.push(<button key="nb" type="button" role="menuitem" onClick={go(() => actions.moveTo(inst.uid, { newPaneAt: inst.pane === 'main' ? 0 : at + 1 }))}>{t('charts.ind.ui.moveNewBelow')}</button>)
-                items.push(<span key="s2" className="indl-sep" />)
-                for (const s of ['right', 'left', 'none'] as const) {
-                  items.push(<button key={`p${s}`} type="button" role="menuitemradio" aria-checked={pin === s} className={pin === s ? 'chk' : ''} onClick={go(() => actions.scale(inst.uid, s))}>{t(`charts.ind.ui.scale_${s}`)}</button>)
-                }
+          <button type="button" aria-label={String(t('charts.ind.ui.more'))} aria-expanded={menu === inst.uid} onClick={(e) => {
+            if (inBox) {
+              const rowEl = e.currentTarget.closest('.indl-row')
+              const leg = rowEl?.closest('.term-legend')
+              const host = rootRef.current?.parentElement
+              if (rowEl && leg && host) {
+                const rb = rowEl.getBoundingClientRect().bottom
+                setMenuTop(rb - leg.getBoundingClientRect().top + 4)
+                // 菜单比下面剩的地方高就限高、里面滚动，免得「存为默认 / 删除」落到图外
+                // Cap the menu to the room below the row (it scrolls) so the last items stay on the chart
+                setMenuMax(Math.max(160, Math.round(host.getBoundingClientRect().bottom - rb - 12)))
               }
-              items.push(<span key="s3" className="indl-sep" />)
-              items.push(<button key="def" type="button" role="menuitem" onClick={go(() => actions.saveDefault(inst.uid))}>{t('charts.ind.ui.saveDefault')}</button>)
-              items.push(<button key="rm" type="button" role="menuitem" className="danger" onClick={go(() => actions.remove(inst.uid))}>{t('charts.ind.ui.remove')}</button>)
-              return items
-            })()}
-          </span>
-        )}
+            }
+            setMenu((m) => (m === inst.uid ? null : inst.uid))
+          }}><Ico d={I.more} /></button>
+        </span>
+        {menu === inst.uid && !inBox && menuFor(inst, def)}
       </div>
     )
   }
@@ -225,10 +272,35 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
       {showRows && (() => {
         const mains = list.filter((i) => i.pane === 'main' || !boxes[i.pane])
         if (mains.length === 0) return null
+        if (phone) {
+          // 手机：第一行永远是「指标 N ▾」开关，展开后的行最多占主图一半高，超出在框里滚动，不压到副图
+          // Phone: the first line is always the "Indicators N" toggle; open rows take at most half the
+          // main pane's height and scroll inside, never spilling onto sub-panes
+          const folded = foldM ?? mains.length > AUTO_FOLD_OVER
+          const lbl = String(t(folded ? 'charts.ind.ui.legendExpand' : 'charts.ind.ui.legendCollapse'))
+          const mainH = boxes.main?.height ?? 0
+          const maxH = Math.max(56, Math.round(mainH * 0.5) - 30)
+          const menuInst = menu ? mains.find((i) => i.uid === menu) : undefined
+          const menuDef = menuInst ? defOf(menuInst.type) : undefined
+          return (
+            <div className="term-legend main indl m">
+              <button type="button" className={`indl-fold m ${folded ? 'folded' : ''}`} aria-expanded={!folded} aria-label={lbl} title={lbl} onClick={() => { setFoldM(!folded); setMenu(null); setActive(null) }}>
+                <span>{t('charts.ind.ui.legendCount', { n: mains.length })}</span>
+                <Ico d={folded ? I.down : I.up} />
+              </button>
+              {!folded && (
+                <div className="indl-box no-sb" style={{ maxHeight: maxH }} onScroll={() => { if (menu) setMenu(null) }}>
+                  {mains.map((i) => row(i, true))}
+                </div>
+              )}
+              {!folded && menuInst && menuDef && menuFor(menuInst, menuDef, { top: menuTop, maxHeight: menuMax })}
+            </div>
+          )
+        }
         const label = String(t(fold ? 'charts.ind.ui.legendExpand' : 'charts.ind.ui.legendCollapse'))
         return (
           <div className="term-legend main indl">
-            {!fold && mains.map(row)}
+            {!fold && mains.map((i) => row(i))}
             {/* 收起 / 展开主图的指标行（收起时显示个数）/ fold or unfold the main pane's rows (the count shows while folded) */}
             <button type="button" className={`indl-fold ${fold ? 'folded' : ''}`} aria-expanded={!fold} aria-label={label} title={label} onClick={() => setFold(!fold)}>
               <Ico d={fold ? I.down : I.up} />
@@ -244,7 +316,7 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
           <div key={p.id}>
             {showRows && (
               <div className="term-legend indl" style={{ left: 'calc(12px + var(--lsw, 0px))', top: b.top + 5 }}>
-                {list.filter((i) => i.pane === p.id).map(row)}
+                {list.filter((i) => i.pane === p.id).map((i) => row(i))}
               </div>
             )}
             {busyPane !== p.id && <div className="indl-pane" style={{ top: b.top + 4, right: axisW + 6 }}>

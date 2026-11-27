@@ -44,14 +44,15 @@ export function resolveColor(c: string, candle: CandleColors, opacity = 100): st
 
 // 图例标题里的参数：默认取数值 / 数据源 / 均线类型输入，按顺序空格分隔。
 // The legend title's parameters: numeric / source / MA-type inputs in order, space separated.
-export function instArgs(def: IndDef, inst: IndInstance, srcName: (v: string) => string): string {
+// compact = 手机图例：数据源没改过（还是默认的收盘价等）就不写 / compact = phone legend: a source left at its default is omitted
+export function instArgs(def: IndDef, inst: IndInstance, srcName: (v: string) => string, compact = false): string {
   if (def.title) return def.title(inst.inputs)
   const parts: string[] = []
   for (const d of def.inputs) {
     const v = inst.inputs[d.key]
     if (d.key === 'offset' && v === 0) continue
     if (d.kind === 'int' || d.kind === 'float') parts.push(String(v))
-    else if (d.kind === 'source') parts.push(srcName(String(v)))
+    else if (d.kind === 'source') { if (!compact || v !== d.def) parts.push(srcName(String(v))) }
     else if (d.kind === 'symbol') parts.push(String(v))
   }
   return parts.join(' ')

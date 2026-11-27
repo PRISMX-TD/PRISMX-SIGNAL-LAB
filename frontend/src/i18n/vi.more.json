@@ -1869,6 +1869,10 @@
         "newPane": "Khung mới",
         "legendCollapse": "Thu gọn chỉ báo",
         "legendExpand": "Mở rộng chỉ báo",
+        "legendCount": "Chỉ báo {{n}}",
+        "dupAsk": "Biểu đồ đã có {{name}}. Thêm một cái giống hệt nữa?",
+        "dupAdd": "Vẫn thêm",
+        "dupCancel": "Thôi",
         "presets": "Mẫu",
         "presetEmpty": "Chưa có mẫu nào. Đặt tên cho tham số và kiểu hiện tại để lưu, sau đó áp dụng chỉ với một lần nhấp."
       },

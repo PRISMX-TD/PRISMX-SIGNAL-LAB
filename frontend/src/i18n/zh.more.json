@@ -1869,6 +1869,10 @@
         "newPane": "新窗格",
         "legendCollapse": "收起指标",
         "legendExpand": "展开指标",
+        "legendCount": "指标 {{n}}",
+        "dupAsk": "图上已经有一条 {{name}}，还要再加一条一样的吗？",
+        "dupAdd": "再加一条",
+        "dupCancel": "不用了",
         "presets": "模板",
         "presetEmpty": "还没有模板。给现在的参数和样式起个名字存下来，之后一键套用。"
       },

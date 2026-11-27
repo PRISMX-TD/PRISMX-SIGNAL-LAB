@@ -13,8 +13,9 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useScrollLock } from '../../../utils/scrollLock'
 import { useDialogA11y } from '../../../utils/useDialogA11y'
-import { IND_GROUPS, IND_IDS, defOf } from './registry'
+import { IND_GROUPS, IND_IDS, defOf, defaultInputs } from './registry'
 import { BUILTIN_TEMPLATES, applyBuiltin, applyTemplate, templateOfLayout } from './store'
+import { instArgs } from './style'
 import { MAX_INSTANCES, type IndLayout } from './types'
 import type { IndLayoutUpdate } from './useIndLayout'
 
@@ -60,11 +61,24 @@ export default function IndicatorDialog({ layout, update, isPro, onAdd, onClose,
   }, [query, cat, layout.favs, layout.recent, t])
 
   const full = layout.list.length >= MAX_INSTANCES
-  const add = (id: string) => {
+  // 要加的和图上某一条参数完全一样（同种、同输入）：先在那一行下面问一句，确认了才加
+  // Adding one identical to an existing instance (same kind, same inputs): ask under that row first
+  const [dup, setDup] = useState<{ id: string; label: string } | null>(null)
+  const add = (id: string, force = false) => {
     const d = defOf(id)
     if (!d) return
     if (d.pro && !isPro) { onClose(); navigate('/upgrade'); return }
     if (full) return
+    if (!force) {
+      const want: Record<string, unknown> = { ...defaultInputs(d), ...(layout.defaults[id]?.inputs ?? {}) }
+      const twin = layout.list.find((i) => i.type === id && Object.keys(want).every((k) => i.inputs[k] === want[k]))
+      if (twin) {
+        const args = instArgs(d, twin, (v) => (v.startsWith('ind:') ? '' : String(t(`charts.ind.src.${v}`))), true)
+        setDup({ id, label: args ? `${d.abbr} ${args}` : d.abbr })
+        return
+      }
+    }
+    setDup(null)
     onAdd(id)
     setFlash(id)
     window.clearTimeout(flashTimer.current)
@@ -166,6 +180,13 @@ export default function IndicatorDialog({ layout, update, isPro, onAdd, onClose,
                       aria-label={String(t(layout.favs.includes(id) ? 'charts.ind.ui.unfav' : 'charts.ind.ui.fav'))} onClick={() => toggleFav(id)}>
                       {star(layout.favs.includes(id))}
                     </button>
+                    {dup?.id === id && (
+                      <div className="indx-dup" role="alert">
+                        <span>{t('charts.ind.ui.dupAsk', { name: dup.label })}</span>
+                        <button type="button" className="ind-btn" onClick={() => setDup(null)}>{t('charts.ind.ui.dupCancel')}</button>
+                        <button type="button" className="ind-btn primary" onClick={() => add(id, true)}>{t('charts.ind.ui.dupAdd')}</button>
+                      </div>
+                    )}
                   </div>
                 )
               })}

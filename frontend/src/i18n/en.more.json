@@ -1869,6 +1869,10 @@
         "newPane": "New pane",
         "legendCollapse": "Collapse indicators",
         "legendExpand": "Expand indicators",
+        "legendCount": "Indicators {{n}}",
+        "dupAsk": "There is already a {{name}} on the chart. Add an identical one?",
+        "dupAdd": "Add anyway",
+        "dupCancel": "Cancel",
         "presets": "Templates",
         "presetEmpty": "No templates yet. Name the current inputs and styles to save them, then apply them in one click."
       },
