@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from math import gcd
 
 from sqlalchemy.exc import IntegrityError
@@ -97,7 +97,7 @@ INTERVAL_SECONDS: dict[str, int] = {
 # pair lets fabricated bars back in (hard to notice). Prefer the conservative side.
 WEEKEND_TRADING_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
 
-# 周末休市窗口(UTC):周五 21:00 收盘,周日 21:00 开盘。
+# 周末休市窗口(UTC):周五 21:00 收盘,周日 21:00 开盘（夏令时；冬令时各晚一小时，见下方 2026-11-27 说明）。
 #
 # 为什么用固定的 UTC 边界,而不是券商/MT5 的服务器时区:MT5 服务器时区本身是
 # GMT+2(冬令时)/GMT+3(夏令时),会随夏令时切换,把它硬编码进来会在换季那周判错。
@@ -128,7 +128,7 @@ WEEKEND_TRADING_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
 # and both admitted and rejected the wrong bars. That was an EA-side bug, not a
 # problem with these bounds — fixed in BrokerUtcOffset().
 #
-# Weekend close window (UTC): Friday 21:00 to Sunday 21:00.
+# Weekend close window (UTC): Friday 21:00 to Sunday 21:00 under US DST (an hour later in winter; see the 2026-11-27 note below).
 #
 # Fixed UTC bounds rather than the broker's/MT5's server timezone: that timezone
 # is itself GMT+2 (winter) / GMT+3 (summer) and shifts with DST, so hardcoding it
@@ -147,8 +147,40 @@ WEEKEND_TRADING_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
 _FRIDAY = 4
 _SATURDAY = 5
 _SUNDAY = 6
-WEEKEND_CLOSE_HOUR_UTC = 21  # 周五这个钟点起休市 / market shut from this hour on Friday
-WEEKEND_OPEN_HOUR_UTC = 21   # 周日这个钟点起开盘 / market open from this hour on Sunday
+WEEKEND_CLOSE_HOUR_UTC = 21  # 夏令时周五收盘钟点 / Friday close hour under US DST
+WEEKEND_OPEN_HOUR_UTC = 21   # 夏令时周日开盘钟点 / Sunday open hour under US DST
+
+# 2026-11-27 起周末边界跟随美国夏令时：外汇周末的真实边界是纽约 17:00，夏令时是
+# 21:00 UTC、冬令时是 22:00 UTC。以前写死 21:00 UTC，冬天每个周五最后一小时的真实
+# 行情（MC 服务器上有、收盘在 21:57 UTC 左右）全部被拦掉——与 MC 逐根对比时发现，
+# 每周五 M1 少约 57 根、H1 少 1 根。周日开盘同理改为纽约 17:00，冬天 21:00–22:00
+# UTC 本来就没有真实行情，以前那一小时放行的只可能是伪造 bar。
+#
+# Since 2026-11-27 the weekend bounds follow US DST: the real FX weekend boundary is
+# 17:00 New York — 21:00 UTC in summer, 22:00 UTC in winter. The old fixed 21:00 UTC
+# dropped the last real hour of every winter Friday (MC has bars until ~21:57 UTC);
+# a bar-by-bar comparison against MC showed ~57 M1 bars and one H1 bar missing each
+# Friday. The Sunday open follows New York 17:00 too: in winter there is no real data
+# between 21:00 and 22:00 UTC, so that hour could only ever admit fabricated bars.
+
+
+def _nth_sunday(year: int, month: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _us_dst_on(day: date) -> bool:
+    """美国夏令时：3 月第二个周日起，到 11 月第一个周日前（切换发生在当地凌晨 2 点，
+    周五/周日 17:00 这个时刻只看日期即可）。
+    US DST: from the second Sunday of March up to the first Sunday of November (the
+    switch is at 02:00 local, so for a 17:00 boundary the date alone decides)."""
+    return _nth_sunday(day.year, 3, 2) <= day < _nth_sunday(day.year, 11, 1)
+
+
+def weekend_boundary_hour_utc(day: date) -> int:
+    """该日纽约 17:00 对应的 UTC 钟点（周五收盘 / 周日开盘都用它）。
+    The UTC hour of 17:00 New York on that day (Friday close and Sunday open)."""
+    return WEEKEND_CLOSE_HOUR_UTC if _us_dst_on(day) else WEEKEND_CLOSE_HOUR_UTC + 1
 
 
 def _is_market_closed(t: float, symbol: str) -> bool:
@@ -174,9 +206,9 @@ def _is_market_closed(t: float, symbol: str) -> bool:
     if weekday == _SATURDAY:
         return True
     if weekday == _FRIDAY:
-        return moment.hour >= WEEKEND_CLOSE_HOUR_UTC
+        return moment.hour >= weekend_boundary_hour_utc(moment.date())
     if weekday == _SUNDAY:
-        return moment.hour < WEEKEND_OPEN_HOUR_UTC
+        return moment.hour < weekend_boundary_hour_utc(moment.date())
     return False
 
 
@@ -422,8 +454,20 @@ def _replay_key(bar: dict) -> tuple:
 # two would miss them; this catches the most common such class (a frozen quote).
 STALLED_CLOSE_BARS = 6
 
+# M1 例外放宽到 10 根(2026-11-27):清淡时段(节假日晚上)的外汇 M1 会出现 1 跳一根、
+# 连续 6~7 根收盘价不变的真实行情——与 MC 逐根对比时 EURUSD 有 4 根这样被当成休市
+# 丢掉。M1 一根才 1 分钟,阈值 10 意味着真正休市时最多漏进 9 分钟的冻结 bar,剩下的
+# 仍由周末窗口与重放判定兜住。其它周期保持 6。
+# M1 is relaxed to 10 (2026-11-27): thin FX hours (holiday evenings) genuinely print
+# 6–7 consecutive one-tick M1 bars with an unchanged close — the MC comparison found 4
+# such EURUSD bars dropped as "closed". At one minute per bar, 10 lets at most 9 minutes
+# of frozen bars through a real closure; other intervals keep 6.
+STALLED_CLOSE_BARS_BY_INTERVAL = {"1": 10}
 
-def _stalled_tail_length(bars: list[dict], previous_closes: list[float]) -> int:
+
+def _stalled_tail_length(
+    bars: list[dict], previous_closes: list[float], threshold: int = STALLED_CLOSE_BARS,
+) -> int:
     """返回这批 bar 末尾有多少根处于"价格停滞"状态,应当作休市数据丢弃。
 
     丢的是**尾段**而不是头段:停滞一旦确认,从确认那根起往后全部是休市数据。头几根
@@ -493,7 +537,7 @@ def _stalled_tail_length(bars: list[dict], previous_closes: list[float]) -> int:
         run = run + 1 if series[i] == series[i - 1] else 1
         if i < offset:
             continue
-        if run >= STALLED_CLOSE_BARS:
+        if run >= threshold:
             # 一旦确认停滞,这一根及其之后全部丢弃。不再检查是否"恢复波动":冻结价格之后
             # 若又开始变动,那是喂价端在伪造行情,而不是市场重开——市场重开会先有真实成交,
             # 表现为价格跳变,而跳变后的那批 bar 会以新批次进来,届时游程从 1 重新起算,
@@ -590,10 +634,26 @@ def _is_replayed_duplicate(bar: dict, recent: set[tuple]) -> bool:
     dropping them would discard real flat markets. The replays observed in
     production all carry a real high/low range (3–8 dollars), so this exemption
     doesn't weaken the fix.
+
+    跳动数很少的 bar(v < REPLAY_MIN_TICK_VOLUME)同理豁免(2026-11-27):清淡时段
+    外汇 M1 常见 2~3 跳、高低差一个点的 bar,同一价位附近几小时内会自然出现一模一样
+    的 OHLCV——与 MC 逐根对比时,感恩节晚上 EURUSD 就这样被误删了 15 根真实 bar。
+    指纹里的 volume 只有一位数时已不足以证明"整根复制";生产上见过的重放副本 volume
+    都在数百到上千。
+    Bars with very few ticks (v < REPLAY_MIN_TICK_VOLUME) are exempt for the same
+    reason (2026-11-27): in thin hours FX M1 prints 2–3-tick, one-point-range bars that
+    naturally repeat the exact OHLCV within hours — the MC comparison found 15 real
+    EURUSD bars wrongly dropped on Thanksgiving evening. A single-digit volume can't
+    prove a verbatim copy; production replays carried volumes in the hundreds.
     """
     if bar["h"] == bar["l"]:
         return False
+    if (bar.get("v") or 0) < REPLAY_MIN_TICK_VOLUME:
+        return False
     return _replay_key(bar) in recent
+
+
+REPLAY_MIN_TICK_VOLUME = 10
 
 
 # ---- 内存窗口 / in-memory window -----------------------------------------------------
@@ -641,6 +701,19 @@ class _SeriesWindow:
         bisect.insort(self.ts, t)
         self.rows[t] = (c, key)
         self.t_by_key.setdefault(key, set()).add(t)
+
+    def replace(self, t: int, o: float, h: float, l: float, c: float, v) -> None:
+        """改写已有一行的值（persist 纠正已存 bar 时用）。/ Rewrite an existing row's values."""
+        old = self.rows.get(t)
+        if old is not None:
+            hits = self.t_by_key.get(old[1])
+            if hits is not None:
+                hits.discard(t)
+                if not hits:
+                    del self.t_by_key[old[1]]
+            del self.rows[t]
+            self.ts.remove(t)
+        self.add(t, o, h, l, c, v)
 
     def has_t(self, t: int) -> bool:
         with self.lock:
@@ -1138,7 +1211,8 @@ def filter_tradeable_bars(
     # consistency floor, or it holds fewer than 12 bars) do we query — a read that
     # used to run 2.6 million times a day.
     win = _window(db, symbol, interval)
-    previous_closes = win.previous_closes(earliest_t, STALLED_CLOSE_BARS * 2)
+    stall_threshold = STALLED_CLOSE_BARS_BY_INTERVAL.get(interval, STALLED_CLOSE_BARS)
+    previous_closes = win.previous_closes(earliest_t, stall_threshold * 2)
     if previous_closes is None:
         previous_closes = [
             r[0]
@@ -1149,10 +1223,10 @@ def filter_tradeable_bars(
                 Candle.t < earliest_t,
             )
             .order_by(Candle.t.desc())
-            .limit(STALLED_CLOSE_BARS * 2)
+            .limit(stall_threshold * 2)
             .all()
         ][::-1]  # 查询是倒序,反转回时间升序 / query is descending; restore ascending order
-    stalled_count = _stalled_tail_length(closed, previous_closes)
+    stalled_count = _stalled_tail_length(closed, previous_closes, stall_threshold)
     if stalled_count:
         # 与周末闸门同理记 info:节假日休市是预期行为,不是故障。
         # info for the same reason as the weekend gate: a holiday closure is expected
@@ -1161,7 +1235,7 @@ def filter_tradeable_bars(
             "filter_tradeable_bars: %s/%s rejected %d bar(s) with a stalled price "
             "(close unchanged for %d+ bars, indicating the market is shut — "
             "holiday or unscheduled closure)",
-            symbol, interval, stalled_count, STALLED_CLOSE_BARS,
+            symbol, interval, stalled_count, stall_threshold,
         )
         closed = closed[:-stalled_count]
         if not closed:
@@ -1347,7 +1421,7 @@ def persist_closed_bars(
     db, symbol: str, interval: str, bars: list[dict],
     prefiltered: list[dict] | None = None,
 ) -> list[int]:
-    """把 `bars` 里通过休市闸门的部分写入数据库,已存在的(symbol, interval, t)跳过。
+    """把 `bars` 里通过休市闸门的部分写入数据库;已存在的(symbol, interval, t)若值有变化就改写成新值。
 
     过滤逻辑全部在 filter_tradeable_bars() 里,这里只负责落库。
     **返回本次新写入那些 bar 的时间戳列表(升序)**,不是行数——调用方要按"这一批
@@ -1361,7 +1435,7 @@ def persist_closed_bars(
     不传则内部自行过滤。
 
     Persist the subset of `bars` that clears the closure gates; rows already
-    present for (symbol, interval, t) are skipped. All filtering lives in
+    present for (symbol, interval, t) are rewritten when the values changed. All filtering lives in
     filter_tradeable_bars(); this function only writes.
     Returns the ascending timestamps of the rows newly inserted by this call (not a
     count): callers drive strategy resolution off "which bars are new", and a bare
@@ -1378,10 +1452,11 @@ def persist_closed_bars(
     if not closed:
         return []
 
-    def _existing_in_db(ts: list[int]) -> set[int]:
+    def _existing_in_db(ts: list[int]) -> dict[int, tuple]:
+        """t → 已存那根的指纹（见 _replay_key）。/ t → fingerprint of the stored row."""
         return {
-            row[0]
-            for row in db.query(Candle.t)
+            row[0]: _replay_key({"o": row[1], "h": row[2], "l": row[3], "c": row[4], "v": row[5]})
+            for row in db.query(Candle.t, Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
             .filter(
                 Candle.symbol == symbol,
                 Candle.interval == interval,
@@ -1414,24 +1489,63 @@ def persist_closed_bars(
     win = _window(db, symbol, interval)
     ts = [b["t"] for b in closed]
     below = [t for t in ts if t < win.covered_from]
-    existing = _existing_in_db(below) if below else set()
-    existing.update(t for t in ts if t >= win.covered_from and win.has_t(t))
+    existing = _existing_in_db(below) if below else {}
+    with win.lock:
+        for t in ts:
+            if t >= win.covered_from and t in win.rows:
+                existing[t] = win.rows[t][1]
     try:
-        new_bars = _insert_missing(existing)
+        new_bars = _insert_missing(set(existing))
     except IntegrityError:
         db.rollback()
         logger.info(
             "persist_closed_bars: %s/%s hit the unique constraint (another writer); "
             "re-checking against the database", symbol, interval,
         )
-        new_bars = _insert_missing(_existing_in_db(ts))
+        existing = _existing_in_db(ts)
+        new_bars = _insert_missing(set(existing))
+
+    # 已存在、但这次带来的值不一样的 bar：以新值为准改写（2026-11-27）。
+    # 以前是"先写者赢"：tick 模式在一根 bar 刚走完的那几秒就把它判为已收盘落库，此时
+    # 最后一两个报价可能还没进来；之后每分钟的 backfill 会带着 MT5 上的最终值再推一遍，
+    # 却因为"已存在"被跳过。与 MC 逐根对比时约 1.5% 的 M1 收盘价差一跳就是这样来的。
+    # 喂价端推的始终是 MT5 自己的 K 线，越晚推的越接近终值，所以直接以新值覆盖。
+    # 只改变化了的行：稳态下一根都不会命中，不额外写库；返回值仍只含新插入的时间戳
+    # （策略判定只关心"新 bar"，改值不该重复触发）。
+    # Existing bars that arrive with different values are rewritten (2026-11-27).
+    # It used to be first-writer-wins: tick mode judges a bar closed seconds after it
+    # ends, possibly before its last quotes landed; the per-minute backfill then resent
+    # MT5's final values and was skipped as "already stored" — the source of the ~1.5%
+    # of M1 closes off by one tick in the MC comparison. The feed always sends MT5's
+    # own bars and later pushes are closer to final, so the new values win. Only changed
+    # rows are touched (none in steady state); the return value still lists only newly
+    # inserted timestamps, since strategy resolution must not re-fire on a correction.
+    inserted_ts = {b["t"] for b in new_bars}
+    changed = [
+        b for b in closed
+        if b["t"] in existing and b["t"] not in inserted_ts and _replay_key(b) != existing[b["t"]]
+    ]
+    for b in changed:
+        db.query(Candle).filter(
+            Candle.symbol == symbol, Candle.interval == interval, Candle.t == b["t"],
+        ).update(
+            {"o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)},
+            synchronize_session=False,
+        )
+    if changed:
+        db.commit()
+        logger.debug("persist_closed_bars: %s/%s corrected %d stored bar(s)", symbol, interval, len(changed))
+
     with win.lock:
         for b in new_bars:
             if b["t"] >= win.covered_from:
                 win.add(b["t"], b["o"], b["h"], b["l"], b["c"], b.get("v", 0))
-    if new_bars:
+        for b in changed:
+            if b["t"] >= win.covered_from:
+                win.replace(b["t"], b["o"], b["h"], b["l"], b["c"], b.get("v", 0))
+    if new_bars or changed:
         _bump_series_version(symbol, interval)   # commit 已完成，通知别的 worker 回库 / after commit
-    inserted = sorted(b["t"] for b in new_bars)
+    inserted = sorted(inserted_ts)
     return inserted
 
 

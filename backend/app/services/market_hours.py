@@ -8,7 +8,7 @@
 数据来源分两级：
 1. 网关 `/symbol-sessions`：直接读 MT5 品种配置里的交易时段、假日表与 TradeMode，按
    服务器时间判「现在能不能开仓」、「下一次几点开盘」。这是和 MT5 **完全对齐**的真源。
-2. 网关不可达 / 品种读不到时退回 candle_store 的固定周末日历（周五 21:00 → 周日 21:00
+2. 网关不可达 / 品种读不到时退回 candle_store 的固定周末日历（周五 → 周日纽约 17:00，即夏令时 21:00 / 冬令时 22:00
    UTC，BTCUSD / ETHUSD 豁免）。粗一点，但周末这个最主要的场景不会漏。
 
 结果按品种缓存 30 秒：下单与前端的状态查询都走这里，不会每次都打一次网关。
@@ -33,7 +33,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.services import gateway_client
-from app.services.candle_store import WEEKEND_OPEN_HOUR_UTC, is_weekend_closed
+from app.services.candle_store import is_weekend_closed, weekend_boundary_hour_utc
 from app.services.symbol_aliases import broker_symbol
 
 logger = logging.getLogger("prismx.market_hours")
@@ -80,20 +80,23 @@ def clear_cache() -> None:
 
 
 def _calendar_status(symbol: str, now: datetime | None = None) -> MarketStatus:
-    """固定周末日历：周五 21:00 → 周日 21:00 UTC 休市，加密货币豁免（见 candle_store）。
-    Fixed weekend calendar: closed Friday 21:00 → Sunday 21:00 UTC, crypto exempt."""
+    """固定周末日历：周五 → 周日纽约 17:00（夏令时 21:00 UTC、冬令时 22:00 UTC）休市，加密货币豁免（见 candle_store）。
+    Fixed weekend calendar: closed Friday → Sunday 17:00 New York (21:00 UTC summer, 22:00 winter), crypto exempt."""
     now = now or datetime.now(timezone.utc)
     base = broker_symbol(symbol.strip().upper())
     closed = is_weekend_closed(now.timestamp(), base)
     next_open = None
     if closed:
-        # 下一个周日 21:00 UTC / the coming Sunday 21:00 UTC
+        # 下一个周日纽约 17:00（夏令时 21:00 UTC、冬令时 22:00 UTC）
+        # The coming Sunday 17:00 New York (21:00 UTC in summer, 22:00 in winter)
         days_ahead = (6 - now.weekday()) % 7
-        candidate = (now + timedelta(days=days_ahead)).replace(
-            hour=WEEKEND_OPEN_HOUR_UTC, minute=0, second=0, microsecond=0,
-        )
+        sunday = (now + timedelta(days=days_ahead)).date()
+        candidate = datetime(sunday.year, sunday.month, sunday.day,
+                             weekend_boundary_hour_utc(sunday), tzinfo=timezone.utc)
         if candidate <= now:
-            candidate += timedelta(days=7)
+            sunday += timedelta(days=7)
+            candidate = datetime(sunday.year, sunday.month, sunday.day,
+                                 weekend_boundary_hour_utc(sunday), tzinfo=timezone.utc)
         next_open = candidate
     return MarketStatus(base, not closed, "calendar", next_open, time.monotonic())
 

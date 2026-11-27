@@ -6,7 +6,7 @@
 
   ① 周期网格：时间戳不在 gcd(周期, 半小时) 网格上 → 拒（半小时时区的小时线要放行）；
   ② 收盘判定：绝对时钟 或 同批有晚一整周期的邻居 → 算收盘（抗 EA 时钟快 11 小时）；
-  ③ 周末窗口：UTC 周五 21:00 至周日 21:00 拒，BTCUSD/ETHUSD 豁免；
+  ③ 周末窗口：周五至周日纽约 17:00 拒（夏令时 21:00 UTC、冬令时 22:00 UTC），BTCUSD/ETHUSD 豁免；
   ④ 价格停滞：连续 6 根收盘价不动，从第 6 根起丢尾段，库里的前序收盘价要接上；
   ⑤ 重放副本：OHLCV 五字段与回看窗口内某根全等 → 拒，平坦 bar 豁免，volume 必须参与。
 
@@ -141,6 +141,29 @@ def test_market_closed_window(when, closed):
     assert cs._is_market_closed(_ts(*when), SYM) is closed
 
 
+@pytest.mark.parametrize("when, closed", [
+    ((2026, 11, 20, 21, 30), False),  # 冬令时周五 21:30 仍在交易（MC 收盘约 21:57）
+    ((2026, 11, 20, 22, 0), True),    # 冬令时周五 22:00 起休市
+    ((2026, 11, 22, 21, 30), True),   # 冬令时周日 21:30 未开
+    ((2026, 11, 22, 22, 0), False),   # 冬令时周日 22:00 开盘
+    ((2026, 3, 6, 21, 30), False),    # 3 月 8 日切夏令时之前的周五：冬令时
+    ((2026, 3, 8, 21, 0), False),     # 切换当天（3 月第二个周日）已是夏令时 → 21:00 开
+    ((2026, 10, 30, 21, 0), True),    # 11 月 1 日切回之前的周五：夏令时 21:00 收
+    ((2026, 11, 1, 21, 30), True),    # 切回当天（11 月第一个周日）是冬令时 → 22:00 才开
+])
+def test_market_closed_window_follows_us_dst(when, closed):
+    assert cs._is_market_closed(_ts(*when), SYM) is closed
+
+
+def test_low_volume_repeat_is_not_a_replay(db_session):
+    """2~3 跳的清淡 M1 自然会重复同一 OHLCV（2026-11-27 MC 对比，EURUSD 被误删 15 根）。"""
+    thin = _bar(WED, o=1.09707, h=1.09707, l=1.09706, c=1.09706, v=2)
+    other = _bar(WED + 60, o=1.0971, h=1.0972, l=1.0970, c=1.0971, v=3)
+    again = dict(thin, t=WED + 120)
+    got = cs.filter_tradeable_bars(db_session, "EURUSD", "1", [thin, other, again])
+    assert [b["t"] for b in got] == [WED, WED + 60, WED + 120]
+
+
 def test_crypto_trades_through_weekend():
     assert cs._is_market_closed(_ts(2026, 7, 25, 12, 0), "BTCUSD") is False
     assert cs._is_market_closed(_ts(2026, 7, 25, 12, 0), "ethusd") is False
@@ -179,10 +202,20 @@ def test_stalled_run_resets_on_price_change():
 
 
 def test_stalled_gate_integration_reads_previous_closes(db_session):
-    stored = [_bar(WED - (5 - i) * 60, c=7.0, h=7.5, l=6.5, v=i) for i in range(5)]
-    _seed(db_session, "1", stored)
-    batch = [_bar(WED, c=7.0, h=7.5, l=6.5, v=50), _bar(WED + 60, c=7.0, h=7.5, l=6.5, v=51)]
-    assert cs.filter_tradeable_bars(db_session, SYM, "1", batch) == []
+    stored = [_bar(WED - (5 - i) * 300, c=7.0, h=7.5, l=6.5, v=i) for i in range(5)]
+    _seed(db_session, "5", stored)
+    batch = [_bar(WED, c=7.0, h=7.5, l=6.5, v=50), _bar(WED + 300, c=7.0, h=7.5, l=6.5, v=51)]
+    assert cs.filter_tradeable_bars(db_session, SYM, "5", batch) == []
+
+
+def test_m1_stall_threshold_is_ten_so_thin_minutes_survive(db_session):
+    """M1 放宽到 10 根（2026-11-27）：节假日晚上 EURUSD 真有 6~7 根 1 跳、收盘不变的 M1。
+    M1 is relaxed to 10: thin holiday evenings print 6–7 unchanged one-tick M1 closes."""
+    seven = [_bar(WED + i * 60, o=1.0969, h=1.0969, l=1.0969, c=1.0969, v=1) for i in range(7)]
+    assert [b["t"] for b in cs.filter_tradeable_bars(db_session, "EURUSD", "1", seven)] == [b["t"] for b in seven]
+    twelve = [_bar(WED + 3600 + i * 60, o=1.0969, h=1.0969, l=1.0969, c=1.0969, v=1) for i in range(12)]
+    got = cs.filter_tradeable_bars(db_session, "EURUSD", "1", twelve)
+    assert len(got) < 12   # 第 10 根起判停滞 / stalled from the 10th on
 
 
 # ---- ⑤ 重放副本 / replayed copies ---------------------------------------------------
@@ -210,8 +243,8 @@ def test_replay_copy_of_stored_bar_rejected_but_different_volume_passes(db_sessi
 
 
 def test_replay_within_same_batch_rejected(db_session):
-    a = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
-    b = _bar(WED + 300, o=1.2, h=2.1, l=0.6, c=1.7, v=10)
+    a = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
+    b = _bar(WED + 300, o=1.2, h=2.1, l=0.6, c=1.7, v=91)
     a_copy = dict(a, t=WED + 600)
     got = cs.filter_tradeable_bars(db_session, SYM, "5", [a, b, a_copy])
     assert [b_["t"] for b_ in got] == [WED, WED + 300]
@@ -219,11 +252,11 @@ def test_replay_within_same_batch_rejected(db_session):
 
 def test_replay_baseline_respects_lookback_window(db_session):
     """H4 回看 26 小时：更早的原件不在基线里，同 OHLCV 的 bar 放行（不是重放）。"""
-    old = _bar(WED - 30 * 3600, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    old = _bar(WED - 30 * 3600, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "240", [old])
     got = cs.filter_tradeable_bars(db_session, SYM, "240", [dict(old, t=WED)])
     assert [b["t"] for b in got] == [WED]
-    recent = _bar(WED - 8 * 3600, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    recent = _bar(WED - 8 * 3600, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "240", [recent])
     assert cs.filter_tradeable_bars(db_session, SYM, "240", [dict(old, t=WED + 4 * 3600)]) == []
 
@@ -262,6 +295,39 @@ def test_persist_skips_existing_and_reports_new_timestamps(db_session):
     assert cs.persist_closed_bars(db_session, SYM, "1", [], prefiltered=[_bar(WED + 999)]) == [WED + 999]
 
 
+def test_persist_rewrites_stored_bar_when_values_change(db_session, monkeypatch):
+    """先写者不再赢（2026-11-27）：tick 模式落了一根少了最后一跳的 bar，之后 backfill 带着
+    终值再来，要改写成终值；返回值不含它（不是新 bar），值没变时不写库也不换版本号。"""
+    store = _fake_shared_state(monkeypatch)
+    cur = _now_grid(60)
+    bars = _walk(cur - 10 * 60, 3, 60)
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", bars, prefiltered=bars) == [b["t"] for b in bars]
+    v1 = store[cs._version_key("BTCUSD", "1")]
+    final = dict(bars[1], c=bars[1]["c"] + 0.01, h=bars[1]["h"] + 0.5, v=bars[1]["v"] + 3)
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", [bars[0], final, bars[2]],
+                                  prefiltered=[bars[0], final, bars[2]]) == []
+    row = db_session.query(Candle).filter_by(symbol="BTCUSD", interval="1", t=final["t"]).one()
+    assert (row.c, row.h, row.v) == (final["c"], final["h"], final["v"])
+    v2 = store[cs._version_key("BTCUSD", "1")]
+    assert v2 != v1
+    win = cs._window(db_session, "BTCUSD", "1")
+    assert win.rows[final["t"]][0] == final["c"]
+    assert cs._replay_key(bars[1]) not in win.t_by_key or final["t"] not in win.t_by_key[cs._replay_key(bars[1])]
+    # 再推一遍同样的终值：什么都不变 / same final values again: nothing changes
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", [final], prefiltered=[final]) == []
+    assert store[cs._version_key("BTCUSD", "1")] == v2
+
+
+def test_persist_rewrites_rows_older_than_the_window(db_session):
+    """窗口下界之前的行（历史回填）同样按值比较后改写。"""
+    old_t = _ts(2026, 7, 1, 10, 0)
+    _seed(db_session, "60", [_bar(old_t, c=2002.0)])
+    fixed = _bar(old_t, c=2003.5, h=2006.0)
+    assert cs.persist_closed_bars(db_session, SYM, "60", [fixed], prefiltered=[fixed]) == []
+    row = db_session.query(Candle).filter_by(symbol=SYM, interval="60", t=old_t).one()
+    assert (row.c, row.h) == (2003.5, 2006.0)
+
+
 def test_cleanup_old_m1_touches_only_old_minute_bars(db_session):
     now = datetime.now(timezone.utc)
     old = int((now - timedelta(days=40)).timestamp())
@@ -277,9 +343,9 @@ def test_replay_baseline_is_sliced_by_each_batch_floor(db_session):
     """先来一批实时 bar，紧接着来一批更早的回填：回填只能和**比它自己更早**的 bar 比，
     不能拿实时批那份基线——那里面的 bar 比回填还晚。旧实现靠"floor 变了就重查"保证
     这一点，代价是缓存被交替作废（09-07 Egress 翻三倍的机制）；现在按 floor 切内存区间。"""
-    real = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    real = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "5", [real])
-    live = [_bar(WED + 3600, o=1.1, h=2.1, l=0.6, c=1.6, v=10)]
+    live = [_bar(WED + 3600, o=1.1, h=2.1, l=0.6, c=1.6, v=91)]
     assert len(cs.filter_tradeable_bars(db_session, SYM, "5", live)) == 1
     # 回填批：floor 在 real 之前，若拿上面的基线会把 real 当"更早的副本"误杀
     backfill = [dict(real, t=WED - 300)]
@@ -340,22 +406,22 @@ def test_window_serves_gates_without_querying_after_warmup(db_session):
 
 def test_window_stalled_gate_uses_in_memory_previous_closes(db_session):
     """前序收盘价来自内存时,停滞判定与查库结果一致：库里 5 根同价 + 本批 1 根同价 = 6 根，丢。"""
-    cur = _now_grid(60)
-    # 库里 12 根：前 7 根收盘各不同，后 5 根收盘都是 1.0
-    stored = [_bar(cur - (17 - i) * 60, c=2.0 + i, h=3.0 + i, l=0.5) for i in range(7)]
-    stored += [_bar(cur - (10 - i) * 60, c=1.0, h=2.0, l=0.5) for i in range(5)]
-    _seed(db_session, "1", stored, symbol="BTCUSD")
-    cs.filter_tradeable_bars(db_session, "BTCUSD", "1", stored[-1:])   # 预热
+    cur = _now_grid(300)
+    # 库里 12 根：前 7 根收盘各不同，后 5 根收盘都是 1.0（M5：停滞阈值 6）
+    stored = [_bar(cur - (17 - i) * 300, c=2.0 + i, h=3.0 + i, l=0.5) for i in range(7)]
+    stored += [_bar(cur - (10 - i) * 300, c=1.0, h=2.0, l=0.5) for i in range(5)]
+    _seed(db_session, "5", stored, symbol="BTCUSD")
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", stored[-1:])   # 预热
     counter = _count_selects(db_session)
-    batch = [_bar(cur - 5 * 60, c=1.0, h=2.5, l=0.4)]
-    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "1", batch) == []
+    batch = [_bar(cur - 5 * 300, c=1.0, h=2.5, l=0.4)]
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "5", batch) == []
     assert counter["n"] == 0
 
 
 def test_window_falls_back_to_db_for_batches_older_than_its_floor(db_session):
     """一次性历史回填送来几周前的数据：起点早于窗口一致性下界,走原来的查库路径,
     重放判定照常成立。"""
-    old = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    old = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "15", [old])
     cs.filter_tradeable_bars(db_session, SYM, "15", [_bar(_now_grid(900) - 900)])   # 加载窗口
     counter = _count_selects(db_session)
@@ -405,7 +471,7 @@ def test_window_pulls_other_workers_rows_only_when_version_changed(db_session, m
     """多 worker（配了 Redis）：只有序列版本号变了才回库补别的 worker 的行；版本没变不查库；
     单 worker（没配 Redis）从不补。"""
     cur = _now_grid(300)
-    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "5", [first], symbol="BTCUSD")
     store = _fake_shared_state(monkeypatch)
     cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])          # 加载窗口（记下版本）
@@ -429,7 +495,7 @@ def test_window_pulls_other_workers_rows_only_when_version_changed(db_session, m
 def test_window_requeries_when_version_unreadable_or_too_old(db_session, monkeypatch):
     """宁多查不算错：读不到版本号（Redis 出错）或距上次同步超过兜底间隔，都要回库。"""
     cur = _now_grid(300)
-    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "5", [first], symbol="BTCUSD")
     store = _fake_shared_state(monkeypatch)
     cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])
@@ -463,7 +529,7 @@ def test_persist_bumps_series_version_only_when_rows_inserted(db_session, monkey
 def test_window_never_syncs_without_shared_state(db_session, monkeypatch):
     """单 worker（没配 Redis）：窗口从不回库补行（与从前一致）。"""
     cur = _now_grid(300)
-    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=90)
     _seed(db_session, "5", [first], symbol="BTCUSD")
     monkeypatch.setattr(cs.shared_state, "enabled", lambda: False)
     cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])
