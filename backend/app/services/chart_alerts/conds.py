@@ -161,29 +161,49 @@ def clean_spec(kind: str, cond: str, raw: Any) -> dict:
 
 # ───────── 画线几何 / drawing geometry ─────────
 # 图表横轴是一根根 K 线，周末没有 K 线；按时间直接线性外推，跨过周末的趋势线会比图上画的
-# 多走两天。所以先把时间换成「开市秒数」（扣掉每周五 21:00 到周日 21:00 UTC 的 48 小时，同
-# candle_store 的周末闸门），在这个坐标里线性插值。7×24 的品种不扣。
+# 多走两天。所以先把时间换成「开市秒数」（扣掉每周五纽约 17:00 到周日纽约 17:00 的 48 小时，
+# 即夏令时 21:00、冬令时 22:00 UTC，与 candle_store 的周末闸门同一规则 weekend_boundary_hour_utc），
+# 在这个坐标里线性插值。7×24 的品种不扣。
+# 做法：先把 UTC 换成纽约钟点（夏令时 −4、冬令时 −5 小时，按 UTC 日期判，同 candle_store），
+# 在那个钟点里休市窗口固定是周五 17:00 起 48 小时。夏令时切换发生在周日凌晨，落在休市窗口里，
+# 换算的 1 小时跳变被休市段吸收，开市秒数仍单调不减；切换那个周末实际休 47 / 49 小时。
 # The chart's x axis is bars and weekends have none; extrapolating in raw time would let a trend
 # line crossing a weekend run two days further than drawn. Time is first mapped to "open seconds"
-# (dropping Friday 21:00 to Sunday 21:00 UTC each week, like candle_store's weekend gate) and the
-# line interpolated there. 7x24 symbols keep raw time.
+# (dropping Friday 17:00 to Sunday 17:00 New York each week: 21:00 UTC under US DST, 22:00 in
+# winter — the same rule as candle_store's weekend gate) and the line interpolated there. 7x24
+# symbols keep raw time. In New York clock time the closed window is a fixed 48h from Friday
+# 17:00; the DST switch happens early Sunday, inside that window, so the 1h jump is absorbed and
+# the axis stays monotonic (the switch weekend is really 47 / 49 hours long in UTC).
 _WEEK = 7 * 86400
 _MONDAY0 = 4 * 86400  # 1970-01-05 00:00 UTC 是周一 / was a Monday
-_CLOSE_FROM = 4 * 86400 + 21 * 3600  # 周五 21:00（相对周一 0 点）/ Friday 21:00 from Monday 00:00
+_CLOSE_FROM = 4 * 86400 + 17 * 3600  # 周五 17:00 纽约钟点（相对周一 0 点）/ Friday 17:00 NY from Monday 00:00
 _CLOSED_LEN = 2 * 86400
 
 
+def _ny_clock(t: float) -> float:
+    """UTC 秒 → 纽约钟点秒（夏令时 −4h，冬令时 −5h；按 UTC 日期判，同 candle_store）。
+    UTC seconds → New York clock seconds (−4h under US DST, −5h otherwise; by UTC date)."""
+    from datetime import datetime, timezone
+
+    from app.services.candle_store import _us_dst_on
+
+    day = datetime.fromtimestamp(t, timezone.utc).date()
+    return t - (4 if _us_dst_on(day) else 5) * 3600
+
+
 def open_time(t: float, symbol: str) -> float:
-    """把 UTC 秒换成开市秒数坐标（单调不减）。Map UTC seconds to the open-seconds axis."""
+    """把 UTC 秒换成开市秒数坐标（单调不减；只用来比差值，绝对值无意义）。
+    Map UTC seconds to the open-seconds axis (monotonic; only differences matter)."""
     from app.services.candle_store import WEEKEND_TRADING_SYMBOLS
 
     if symbol.upper() in WEEKEND_TRADING_SYMBOLS:
         return t
-    rel = t - _MONDAY0
+    n = _ny_clock(t)
+    rel = n - _MONDAY0
     weeks = math.floor(rel / _WEEK)
     off = rel - weeks * _WEEK
     closed = weeks * _CLOSED_LEN + min(max(off - _CLOSE_FROM, 0.0), _CLOSED_LEN)
-    return t - closed
+    return n - closed
 
 
 def line_value(line: dict, t: float, symbol: str) -> float | None:

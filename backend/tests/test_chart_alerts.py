@@ -65,6 +65,53 @@ def test_open_time_skips_weekends():
     assert C.line_value(flat, sun22, "XAUUSD") == 100.0
 
 
+
+def _utc(*a):
+    return datetime(*a, tzinfo=timezone.utc).timestamp()
+
+
+def test_open_time_weekend_follows_us_dst():
+    """冬令时周五 21:00–22:00 UTC 仍在交易；夏令时 21:00 收盘；切换周末休 47 / 49 小时。
+    Winter Friday 21:00-22:00 UTC still trades; summer closes at 21:00; switch weekends."""
+    ot = C.open_time
+    # 冬令时（2026-11-20 周五）：21:00→22:00 一整小时开市，22:00 之后到周日 22:00 不计
+    assert ot(_utc(2026, 11, 20, 22), "EURUSD") - ot(_utc(2026, 11, 20, 21), "EURUSD") == pytest.approx(3600)
+    assert ot(_utc(2026, 11, 22, 22), "EURUSD") == pytest.approx(ot(_utc(2026, 11, 20, 22), "EURUSD"))
+    assert ot(_utc(2026, 11, 22, 21, 30), "EURUSD") == pytest.approx(ot(_utc(2026, 11, 21, 12), "EURUSD"))
+    # 夏令时（2026-07-17 周五）：21:00 收盘、周日 21:00 开盘
+    assert ot(_utc(2026, 7, 17, 22), "EURUSD") == pytest.approx(ot(_utc(2026, 7, 17, 21), "EURUSD"))
+    assert ot(_utc(2026, 7, 19, 22), "EURUSD") - ot(_utc(2026, 7, 17, 20), "EURUSD") == pytest.approx(7200)
+    # 春季切换周末（2026-03-08 周日起夏令时）：周五 22:00 收、周日 21:00 开 → 休 47 小时
+    fri, sun = _utc(2026, 3, 6, 22), _utc(2026, 3, 8, 21)
+    assert sun - fri == 47 * 3600
+    assert ot(sun, "EURUSD") == pytest.approx(ot(fri, "EURUSD"))
+    assert ot(sun + 600, "EURUSD") - ot(fri - 600, "EURUSD") == pytest.approx(1200)
+    # 秋季切换周末（2026-11-01 周日起冬令时）：周五 21:00 收、周日 22:00 开 → 休 49 小时
+    fri, sun = _utc(2026, 10, 30, 21), _utc(2026, 11, 1, 22)
+    assert ot(sun, "EURUSD") == pytest.approx(ot(fri, "EURUSD"))
+    assert ot(sun + 600, "EURUSD") - ot(fri - 600, "EURUSD") == pytest.approx(1200)
+    # 单调不减（按 10 分钟扫两个切换周期）/ monotonic across both switches
+    prev = None
+    for start in (_utc(2026, 3, 5), _utc(2026, 10, 29)):
+        for k in range(0, 5 * 86400, 600):
+            v = ot(start + k, "EURUSD")
+            assert prev is None or v >= prev - 1e-6
+            prev = v
+        prev = None
+
+
+def test_open_time_agrees_with_candle_gate():
+    """开市秒数在休市段内不走，与 candle_store 的周末闸门逐 10 分钟一致。
+    The open-seconds axis is flat exactly where candle_store's weekend gate says closed."""
+    from app.services.candle_store import is_weekend_closed
+
+    for start in (_utc(2026, 3, 5), _utc(2026, 7, 16), _utc(2026, 10, 29), _utc(2026, 11, 19)):
+        for k in range(0, 5 * 86400, 600):
+            t = start + k
+            moved = C.open_time(t + 600, "EURUSD") - C.open_time(t, "EURUSD")
+            assert (moved == pytest.approx(0)) == is_weekend_closed(t, "EURUSD"), t
+
+
 def test_broker_offset_and_bar_start():
     winter = datetime(2026, 1, 15, 12, tzinfo=timezone.utc).timestamp()
     summer = datetime(2026, 7, 15, 12, tzinfo=timezone.utc).timestamp()
