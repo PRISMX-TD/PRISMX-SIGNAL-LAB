@@ -401,6 +401,14 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
   const dataKeyRef = useRef('')
   const data = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
   const { hasData, stale, lastPrice, dayStats, ensureHistory, replay, replayActive } = data
+  // 回放接返回手势：选起点、加载、回放中都算一层——返回先取消选点 / 退出回放，再轮到下一层。
+  // 三个状态合成一个开关，选点 → 开始回放之间不来回弹出 / 压入历史记录。
+  // Replay claims the back gesture: picking, loading and replaying are one layer — back cancels the pick or
+  // exits the replay before anything below. One flag for all three, so pick → play doesn't pop / push history.
+  useBackToClose(replay.selecting || replay.loading || replayActive, () => {
+    if (replay.selecting) replay.cancelSelect()
+    else replay.exit()
+  })
 
   // ── 对比品种（compare/useCompare）：条目在布局 JSON 的 PaneState.compare，这里只画 ──
   // ── compare symbols (compare/useCompare): entries live in PaneState.compare (layout JSON); drawn here ──

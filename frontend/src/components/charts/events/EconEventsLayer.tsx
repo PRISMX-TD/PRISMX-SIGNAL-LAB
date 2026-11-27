@@ -21,6 +21,7 @@ import { Countdown, filled, fmtNum, rowsOf } from '../../admin/econ/econShared'
 import { BLOCK_DAYS, type EconEvent } from './econEvents'
 import { BADGE_R, EconEventsPrimitive, impColor, type DrawnCluster } from './EconEventsPrimitive'
 import { useEconEvents } from './useEconEvents'
+import { useBackToClose } from '../../../utils/useBackToClose'
 import '../../../styles/chart-events.css'
 
 export interface EconEventsLayerProps {
@@ -67,6 +68,8 @@ function EconEventsLayer({ chart, series, symbol, enabled, minImportance = 2, ti
   useEffect(() => { prim.setHovered(active) }, [prim, active])
   // 换品种 / 关掉时收起卡片 / close the card on symbol switch or when disabled
   useEffect(() => { setPinned(null); setHover(null) }, [symbol, enabled])
+  // 点开（钉住）的卡片接返回手势：返回先收卡片，不越过它离开图表 / a pinned card claims the back gesture
+  useBackToClose(pinned != null, () => setPinned(null))
 
   // 可见时间范围：只在跨块时更新 state（平移不会每帧重渲染）
   // Visible time range: state changes only when a block boundary is crossed (no per-frame renders)
