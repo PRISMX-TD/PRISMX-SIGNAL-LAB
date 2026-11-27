@@ -317,6 +317,15 @@ interface Props {
 }
 const NO_COMPARE: CompareEntry[] = []
 
+// 所有窗格的价格轴回到自动缩放（某个窗格没有左轴就跳过）/ auto-scale every pane's price scales (a pane without a side is skipped)
+function autoAllScales(c: IChartApi) {
+  c.panes().forEach((_, i) => {
+    for (const side of ['right', 'left'] as const) {
+      try { c.priceScale(side, i).applyOptions({ autoScale: true }) } catch { /* 该窗格没有这一侧 / no such scale */ }
+    }
+  })
+}
+
 function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
   const { idx, env, symbol, interval, ind, updateInd, active, multi } = p
   const { t } = useTranslation()
@@ -556,9 +565,10 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
       const c = chartRef.current
       if (!c) return
       c.timeScale().resetTimeScale()
-      c.priceScale('right').applyOptions({ autoScale: true })
+      autoAllScales(c)
     },
-    autoScale: () => { chartRef.current?.priceScale('right').applyOptions({ autoScale: true }) },
+    // 每个窗格的左右价格轴都回到自动（滚轮可以单独拉伸副图的轴）/ every pane's scales back to auto (the wheel can stretch sub-pane axes)
+    autoScale: () => { const c = chartRef.current; if (c) autoAllScales(c) },
     goToTime,
     applyRange,
     takeShot,

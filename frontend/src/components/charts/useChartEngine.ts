@@ -21,6 +21,7 @@ import {
   createTextWatermark,
   ColorType,
   CrosshairMode,
+  PriceScaleMode,
   LineStyle,
   LineSeries,
   LineType,
@@ -41,7 +42,7 @@ import {
   type SeriesType,
 } from 'lightweight-charts'
 import type { Candle } from '../../api/types'
-import { markChartDisposed } from './chartLifecycle'
+import { isChartAlive, markChartDisposed } from './chartLifecycle'
 import { ZonePrimitive, type BarStrip, type ZoneRect } from './zonePrimitive'
 import { EMPTY_LEGEND, dirColorsOf, type CandleColors, type LegendValues } from './chartConfig'
 import { createLegendStore } from './legendStore'
@@ -766,6 +767,53 @@ export function useChartEngine(
     })
     ro.observe(el)
 
+    // 鼠标滚轮停在价格轴上 = 纵向拉伸 / 压缩那个窗格的价格轴（以可见区间中点为轴心，对数坐标按对数算），
+    // 不再横向缩放时间轴；双击价格轴或右键「自动缩放」恢复。挂在外层捕获阶段：轴上叠着的警报标签、
+    // 画线层也算在内；落在菜单 / 弹窗 / 输入框上的滚轮不管。
+    // The wheel over a price axis stretches / squeezes that pane's price scale (around the visible
+    // range's midpoint, in log space for log scales) instead of zooming time; double-clicking the axis
+    // or "auto scale" restores it. Captured on the host so tags / the draw layer over the axis count too;
+    // wheels over menus, dialogs and inputs are left alone.
+    const wheelHost = el.parentElement ?? el
+    const onAxisWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.deltaY === 0 || !isChartAlive(chart)) return
+      const tgt = e.target as HTMLElement | null
+      if (tgt?.closest?.('[role="menu"], [role="dialog"], .indl-menu, input, textarea, select')) return
+      const r = el.getBoundingClientRect()
+      const x = e.clientX - r.left
+      let y = e.clientY - r.top
+      if (x < 0 || x > r.width || y < 0) return
+      const rw = chart.priceScale('right').width()
+      const lw = chart.priceScale('left').width()
+      const side = rw > 0 && x >= r.width - rw ? 'right' : lw > 0 && x <= lw ? 'left' : null
+      if (!side) return
+      const panes = chart.panes()
+      let idx = -1
+      for (let i = 0; i < panes.length; i++) {
+        const h = panes[i].getHeight()
+        if (y < h) { idx = i; break }
+        y -= h + 1
+      }
+      if (idx < 0 || panes[idx].getHeight() < 8) return
+      let ps: ReturnType<typeof chart.priceScale>
+      try { ps = chart.priceScale(side, idx) } catch { return }
+      const vr = ps.getVisibleRange()
+      if (!vr || !Number.isFinite(vr.from) || !Number.isFinite(vr.to) || vr.to === vr.from) return
+      e.preventDefault()
+      e.stopPropagation()
+      const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
+      // 往下滚 = 压缩（区间变大），往上滚 = 拉伸；单次夹在 ×0.7–×1.4 / down squeezes, up stretches; clamped per event
+      const k = Math.min(1.4, Math.max(0.7, Math.exp(px * 0.002)))
+      const log = ps.options().mode === PriceScaleMode.Logarithmic && vr.from > 0 && vr.to > 0
+      const f = log ? Math.log : (v: number) => v
+      const g = log ? Math.exp : (v: number) => v
+      const a = f(vr.from), b = f(vr.to), mid = (a + b) / 2, half = ((b - a) / 2) * k
+      if (!Number.isFinite(half) || Math.abs(half) < 1e-12) return
+      ps.setAutoScale(false)
+      ps.setVisibleRange({ from: g(mid - half), to: g(mid + half) })
+    }
+    wheelHost.addEventListener('wheel', onAxisWheel, { capture: true, passive: false })
+
     // 用户拖了窗格分隔条：读回各窗格高度，交给页面存成新的权重。
     // The user dragged a pane separator: read the heights back and let the page store new weights.
     const onUp = () => {
@@ -795,6 +843,7 @@ export function useChartEngine(
 
     return () => {
       ro.disconnect()
+      wheelHost.removeEventListener('wheel', onAxisWheel, { capture: true })
       el.removeEventListener('pointerup', onUp)
       chart.unsubscribeCrosshairMove(onCrosshairMove)
       window.clearTimeout(fullRenderTimerRef.current)
