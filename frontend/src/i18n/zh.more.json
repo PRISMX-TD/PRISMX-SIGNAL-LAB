@@ -5440,7 +5440,21 @@
         "credited": "计入：{{name}}",
         "approveBody": "确认批准？",
         "rejectBody": "确认驳回？",
-        "notePlaceholder": "审批备注（可选）"
+        "notePlaceholder": "审批备注（可选）",
+        "whySelf": "客户端自报为实盘，未经券商核实",
+        "whyBroker": "同号直连已由券商组名确认为实盘",
+        "channel": "来源：{{v}}",
+        "channels": {
+          "bridge": "桥接",
+          "gateway": "直连",
+          "ea": "EA"
+        },
+        "balance": "余额 {{v}}",
+        "lastSeen": "最后在线 {{v}}",
+        "noAccount": "该账号已不在绑定列表",
+        "effectCredited": "批准后计入 {{name}} 的业绩",
+        "effectNone": "未关联跟进——批准只计入开户统计，不给任何客服记业绩",
+        "linkedFollowUp": "关联跟进：{{name}} · {{goal}}"
       },
       "perf": {
         "start": "开始日期",

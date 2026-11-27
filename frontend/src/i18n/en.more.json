@@ -5450,7 +5450,21 @@
         "credited": "Credited to {{name}}",
         "approveBody": "Approve this?",
         "rejectBody": "Reject this?",
-        "notePlaceholder": "Review note (optional)"
+        "notePlaceholder": "Review note (optional)",
+        "whySelf": "Reported as real by the user's client — not verified with the broker",
+        "whyBroker": "Same login confirmed real via broker group on the gateway",
+        "channel": "Source: {{v}}",
+        "channels": {
+          "bridge": "Bridge",
+          "gateway": "Gateway",
+          "ea": "EA"
+        },
+        "balance": "Balance {{v}}",
+        "lastSeen": "Last seen {{v}}",
+        "noAccount": "Account is no longer bound",
+        "effectCredited": "Approving credits {{name}}",
+        "effectNone": "No follow-up linked — approving only counts it in open-account stats; no agent gets credit",
+        "linkedFollowUp": "Follow-up: {{name}} · {{goal}}"
       },
       "perf": {
         "start": "Start date",

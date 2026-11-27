@@ -1751,12 +1751,45 @@ def admin_support_conversions(
     if creditedTo:
         q = q.filter(Conversion.credited_to == creditedTo)
     rows = q.order_by(Conversion.created_at.desc()).offset(offset).limit(limit).all()
-    names = _names(db, {c.user_id for c in rows} | {c.credited_to for c in rows})
+    # 审核要看清「这是谁、哪个号、凭什么待审、批了记给谁」（2026-11-27）：补邮箱、
+    # 关联跟进（目标 + 客服）、同一 login 的账号现状（各通道、余额、最后在线、券商组名是否已确认实盘）。
+    # Reviewers need who / which account / why pending / who gets credit: add the email,
+    # the linked follow-up, and the live state of every row with that login.
+    fu_ids = {c.follow_up_id for c in rows if c.follow_up_id}
+    fus = {f.id: f for f in db.query(FollowUp).filter(FollowUp.id.in_(fu_ids)).all()} if fu_ids else {}
+    names = _names(db, {c.user_id for c in rows} | {c.credited_to for c in rows}
+                   | {f.assignee_id for f in fus.values()})
+    user_ids = {c.user_id for c in rows}
+    emails = {u.id: u.email for u in db.query(User.id, User.email).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    accts: dict[tuple[str, str], list[MT5Account]] = {}
+    if user_ids and any(c.kind == conversions.KIND_MT5_REAL for c in rows):
+        for a in db.query(MT5Account).filter(MT5Account.user_id.in_(user_ids)).all():
+            accts.setdefault((a.user_id, str(a.login)), []).append(a)
     items = []
     for c in rows:
         v = _conversion_view(c, None)
         v["userName"] = names.get(c.user_id)
+        v["userEmail"] = emails.get(c.user_id)
         v["creditedName"] = names.get(c.credited_to)
+        fu = fus.get(c.follow_up_id) if c.follow_up_id else None
+        v["followUp"] = ({"goal": fu.goal, "status": fu.status, "assigneeName": names.get(fu.assignee_id)}
+                         if fu is not None else None)
+        login = str((v.get("detail") or {}).get("login") or "")
+        same = accts.get((c.user_id, login), []) if c.kind == conversions.KIND_MT5_REAL and login else []
+        if same:
+            beats = [a.last_heartbeat for a in same if a.last_heartbeat]
+            main = max(same, key=lambda a: (a.balance is not None, a.last_heartbeat or datetime.min))
+            v["account"] = {
+                "channels": sorted({a.source or "bridge" for a in same}),
+                "balance": main.balance,
+                "equity": main.equity,
+                "currency": main.account_currency,
+                "lastHeartbeat": max(beats) if beats else None,
+                # 网关按券商组名判的实盘 = 已被券商侧证实 / a gateway row typed by broker group
+                "brokerConfirmed": any(a.source == "gateway" and a.trade_mode_source == "group" for a in same),
+            }
+        else:
+            v["account"] = None
         items.append(v)
     return {"items": items}
 

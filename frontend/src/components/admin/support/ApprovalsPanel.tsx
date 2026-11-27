@@ -108,7 +108,7 @@ export default function ApprovalsPanel({ onToast }: { onToast: (kind: 'ok' | 'er
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="tag bg-warn/15 text-warn">{t(`supportDesk.conversions.kind.${c.kind}`)}</span>
                   <span className="text-neutral-300">{c.userName || c.userId}</span>
-                  {c.creditedName && <span className="text-neutral-500">{t('admin.support.approvals.credited', { name: c.creditedName })}</span>}
+                  {c.userEmail && c.userEmail !== c.userName && <span className="break-all text-neutral-500">{c.userEmail}</span>}
                   <span className="num text-neutral-500">{fmtTime(c.createdAt)}</span>
                 </div>
                 {c.detail && (
@@ -116,6 +116,40 @@ export default function ApprovalsPanel({ onToast }: { onToast: (kind: 'ok' | 'er
                     {[str(c.detail.login), str(c.detail.server)].filter(Boolean).join(' · ')}
                   </p>
                 )}
+                {c.kind === 'mt5_real' && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-neutral-400">
+                    {c.detail?.tradeModeSource === 'self' && (
+                      <span className={c.account?.brokerConfirmed ? 'text-neutral-500' : 'text-warn'}>{t('admin.support.approvals.whySelf')}</span>
+                    )}
+                    {c.account?.brokerConfirmed && <span className="text-up">{t('admin.support.approvals.whyBroker')}</span>}
+                    {c.account ? (
+                      <>
+                        <span>{t('admin.support.approvals.channel', {
+                          v: c.account.channels.map((ch) => t(`admin.support.approvals.channels.${ch}`, { defaultValue: ch })).join(' + '),
+                        })}</span>
+                        {c.account.balance != null && (
+                          <span className="num">{t('admin.support.approvals.balance', {
+                            v: `${c.account.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}${c.account.currency ? ` ${c.account.currency}` : ''}`,
+                          })}</span>
+                        )}
+                        {c.account.lastHeartbeat && <span className="num">{t('admin.support.approvals.lastSeen', { v: fmtTime(c.account.lastHeartbeat) })}</span>}
+                      </>
+                    ) : (
+                      <span className="text-neutral-500">{t('admin.support.approvals.noAccount')}</span>
+                    )}
+                  </div>
+                )}
+                <p className="mt-1.5 text-neutral-500">
+                  {c.followUp && (
+                    <span className="mr-3">{t('admin.support.approvals.linkedFollowUp', {
+                      name: c.followUp.assigneeName || '—',
+                      goal: t(`supportDesk.goal.${c.followUp.goal}`, { defaultValue: c.followUp.goal }),
+                    })}</span>
+                  )}
+                  {c.creditedName
+                    ? t('admin.support.approvals.effectCredited', { name: c.creditedName })
+                    : t('admin.support.approvals.effectNone')}
+                </p>
               </div>
               {buttons('conv', c.id)}
             </div>

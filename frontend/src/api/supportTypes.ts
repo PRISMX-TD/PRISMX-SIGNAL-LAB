@@ -140,6 +140,17 @@ export interface SupportConversion {
   detail?: Record<string, unknown>
   userName?: string | null
   creditedName?: string | null
+  // 仅 admin 转化列表（2026-11-27）/ admin conversion list only
+  userEmail?: string | null
+  followUp?: { goal: string; status: string; assigneeName: string | null } | null
+  account?: {
+    channels: string[]
+    balance: number | null
+    equity: number | null
+    currency: string | null
+    lastHeartbeat: string | null
+    brokerConfirmed: boolean
+  } | null
 }
 
 export interface SupportCardTicket {

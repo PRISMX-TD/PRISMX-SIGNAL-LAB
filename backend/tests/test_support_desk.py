@@ -459,6 +459,12 @@ def test_pending_review_conversion_approval_converts_follow_up(client, db, peopl
     db.commit()
     db.refresh(fu)
     assert conv.status == "pending_review" and fu.status == "pending"
+    # 审批卡片要的上下文：邮箱、关联跟进、账号现状 / context the approval card needs
+    r = client.get("/api/admin/support/conversions?status=pending_review", headers=_auth(people["admin"]))
+    item = next(i for i in r.json()["items"] if i["id"] == conv.id)
+    assert item["userEmail"] == c.email
+    assert item["followUp"]["goal"] == "open_mt5" and item["followUp"]["assigneeName"]
+    assert item["account"]["channels"] == ["bridge"] and item["account"]["brokerConfirmed"] is False
     r = client.post(f"/api/admin/support/conversions/{conv.id}/review", json={"approve": True},
                     headers=_auth(people["admin"]))
     assert r.status_code == 200 and r.json()["conversion"]["status"] == "confirmed"
