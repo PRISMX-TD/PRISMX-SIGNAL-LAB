@@ -2315,7 +2315,9 @@
     "focus": {
       "title": "Lệnh từ báo cáo của bạn",
       "noPrice": "Báo cáo này được lưu trước khi có giá khớp, nên chỉ hiển thị thời điểm mở lệnh.",
-      "close": "Đóng"
+      "close": "Đóng",
+      "replay": "Phát lại lệnh này",
+      "replayHint": "Phát từng nến, bắt đầu ngay trước lúc vào lệnh"
     }
   },
   "winrate": {
@@ -4785,6 +4787,193 @@
       "trend": "Diễn biến điểm tổng hợp",
       "note": "Mũi tên so sánh với {{month}}.",
       "noteLive": "Mũi tên so sánh với {{month}}. Tháng chưa kết thúc nên lãi lỗ ròng và số lệnh sẽ được so sánh sau khi lưu báo cáo."
+    },
+    "week": {
+      "title": "Tổng kết tuần",
+      "this": "Tuần này",
+      "last": "Tuần trước",
+      "range": "{{from}} – {{to}} (thứ Hai đến Chủ nhật, theo UTC)",
+      "empty": "Tuần này chưa có lệnh nào đã đóng.",
+      "profit": "Lãi lỗ ròng",
+      "trades": "Số lệnh",
+      "winRate": "Tỷ lệ thắng",
+      "score": "Điểm tổng hợp",
+      "issue": "Vấn đề hay gặp nhất",
+      "issueValue": "{{name}} × {{n}}",
+      "issueNone": "Không có lệnh nào bị gắn nhãn vấn đề",
+      "topSymbol": "Sản phẩm giao dịch nhiều nhất",
+      "bestDay": "Ngày tốt nhất",
+      "worstDay": "Ngày tệ nhất",
+      "vsLast": "Mũi tên so sánh với tuần trước."
+    },
+    "streak": {
+      "title": "Chuỗi kỷ luật",
+      "lead": "Chỉ xét thói quen, không xét lãi lỗ. Tính trên 90 ngày gần nhất.",
+      "stops": "Liên tục có cắt lỗ",
+      "noHeldLoser": "Liên tục không gồng lỗ",
+      "noRevenge": "Liên tục không nhồi lệnh gỡ",
+      "noMovedStop": "Liên tục không dời cắt lỗ ra xa",
+      "unit": {
+        "trades": "{{n}} lệnh",
+        "days": "{{n}} ngày"
+      },
+      "best": "Dài nhất trong 90 ngày: {{v}}",
+      "broken": "Đứt chuỗi ngày {{date}}, trước đó liên tục {{v}}"
+    },
+    "goal": {
+      "title": "Mục tiêu tháng này",
+      "titleArchived": "Mục tiêu của tháng này",
+      "set": "Đặt mục tiêu",
+      "edit": "Sửa",
+      "empty": "Chưa đặt mục tiêu. Chọn một hai việc muốn làm được trong tháng này, báo cáo sẽ cho biết tiến độ mỗi ngày.",
+      "save": "Lưu",
+      "cancel": "Hủy",
+      "add": "Thêm mục tiêu (tối đa {{n}})",
+      "remove": "Xóa mục tiêu này",
+      "pick": "Chọn một mục tiêu",
+      "target": "Tính cách mục tiêu",
+      "targetNone": "Không đặt",
+      "targetNote": "Tính theo \"Xu hướng tháng này\": nếu chốt hôm nay, từng trục đã nằm về phía mục tiêu hay chưa.",
+      "axisMet": "Đã là \"{{pole}}\"",
+      "axisNeed": "{{from}} → cần thành \"{{pole}}\"",
+      "now": "hiện tại {{v}}",
+      "count": "{{n}} lệnh",
+      "unitCount": "lệnh",
+      "invalid": "Giá trị của \"{{name}}\" nằm ngoài khoảng cho phép.",
+      "editNote": "Mục tiêu được giữ cho đến khi bạn thay đổi. Khi chốt vào ngày 1 hằng tháng, kết quả sẽ được lưu vào báo cáo của tháng đó.",
+      "setAt": "Đặt ngày {{date}}",
+      "metric": {
+        "winRate": "Tỷ lệ thắng",
+        "payoff": "Tỷ lệ lãi/lỗ",
+        "score": "Điểm tổng hợp",
+        "maxDrawdown": "Sụt giảm tối đa",
+        "trades": "Số lệnh",
+        "unprotected": "Lệnh không có cắt lỗ",
+        "heldLoser": "Gồng lỗ",
+        "revenge": "Nhồi lệnh gỡ",
+        "movedStop": "Dời cắt lỗ ra xa"
+      },
+      "rule": {
+        "ge": "Mục tiêu: không dưới {{v}}",
+        "le": "Mục tiêu: không quá {{v}}"
+      },
+      "dir": {
+        "ge": "không dưới",
+        "le": "không quá"
+      },
+      "state": {
+        "met": "Đạt",
+        "unmet": "Không đạt",
+        "pending": "Đang thực hiện",
+        "onTrack": "Hiện đang đạt",
+        "over": "Đã vượt"
+      }
+    },
+    "peers": {
+      "title": "So với người cùng tính cách",
+      "leadCode": "So với {{n}} nhà giao dịch cũng là \"{{name}}\".",
+      "leadFamily": "Chưa đủ người cùng tính cách, nên đây là so với {{n}} nhà giao dịch trong nhóm \"{{family}}\".",
+      "you": "Bạn",
+      "them": "Trung vị của họ",
+      "note": "Cả hai bên dùng dữ liệu 90 ngày của kỳ chốt gần nhất. Chỉ để tham khảo, không nói kiểu nào tốt hơn.",
+      "row": {
+        "medianHoldMin": "Thời gian giữ lệnh trung vị",
+        "perDay": "Số lần vào lệnh mỗi ngày giao dịch",
+        "payoff": "Tỷ lệ lãi/lỗ",
+        "holdRatio": "Thời gian giữ lệnh lỗ / lệnh lãi",
+        "signalShare": "Tỷ lệ lệnh theo tín hiệu",
+        "manageShare": "Tỷ lệ lệnh sửa SL/TP sau khi mở"
+      }
+    },
+    "alert": {
+      "title": "Nhắc mức lỗ trong ngày",
+      "lead": "Tự đặt \"hôm nay lỗ tối đa bao nhiêu\". Khi chạm mức đó bạn nhận một thông báo. Chỉ là nhắc nhở: không chặn lệnh và không đóng lệnh thay bạn.",
+      "limit": "Lỗ tối đa hôm nay",
+      "on": "Đang bật",
+      "off": "Chưa bật",
+      "enable": "Bật nhắc",
+      "update": "Cập nhật số tiền",
+      "disable": "Tắt",
+      "savedOn": "Đã lưu. Bạn sẽ được nhắc khi mức lỗ hôm nay chạm số này.",
+      "savedOff": "Đã tắt nhắc.",
+      "fired": "Hôm nay đã nhắc một lần, ngày mai sẽ tính lại.",
+      "note": "Tính theo ngày UTC: lãi lỗ của các lệnh tài khoản thật đã đóng hôm nay cộng với lãi lỗ thả nổi của các vị thế tài khoản thật đang mở. Mỗi ngày chỉ nhắc một lần.",
+      "invalid": "Hãy nhập số tiền từ 1 đến 1.000.000."
+    },
+    "preview": {
+      "pill": "Xem trước tài khoản demo",
+      "title": "Trên tài khoản demo, bạn là \"{{name}}\"",
+      "lead": "Được tính từ lệnh demo 90 ngày gần nhất theo cùng bộ quy tắc, chỉ là bản xem trước. Mở tài khoản thật và hoàn thành 20 lần vào lệnh để có tính cách chính thức và báo cáo giao dịch hằng tháng.",
+      "progressTitle": "Xem trước tính cách của bạn trên demo",
+      "progressLead": "Lệnh demo cũng có thể xem trước tính cách giao dịch, với cùng điều kiện như tài khoản thật.",
+      "share": "Chia sẻ bản xem trước"
+    },
+    "annual": {
+      "chip": "Năm {{y}}",
+      "title": "Báo cáo giao dịch năm {{y}}",
+      "none": "Năm này chưa có báo cáo năm.",
+      "empty": "Năm này không có lệnh nào đã đóng.",
+      "preview": "Xem trước: dữ liệu của năm nay tính đến hiện tại. Báo cáo năm chính thức ra ngày 1 tháng 1.",
+      "covers": "Từ {{from}} đến {{to}}, tổng {{n}} tháng",
+      "net": "Lãi lỗ ròng năm {{y}}",
+      "monthly": "Theo từng tháng",
+      "monthlyNote": "Cột là lãi lỗ ròng của tháng, con số bên dưới là điểm tổng hợp của tháng đó.",
+      "journey": "Tính cách của bạn trong năm",
+      "journeySame": "Cả năm bạn luôn là \"{{name}}\".",
+      "journeyChanged": "Năm nay tính cách của bạn đổi {{n}} lần, lâu nhất là \"{{name}}\".",
+      "records": "Kỷ lục của năm",
+      "record": {
+        "bestTrade": "Lệnh lãi nhất",
+        "worstTrade": "Lệnh lỗ nhất",
+        "bestDay": "Ngày tốt nhất",
+        "worstDay": "Ngày tệ nhất",
+        "bestMonth": "Tháng tốt nhất",
+        "busiestDay": "Ngày giao dịch nhiều nhất",
+        "winRun": "Chuỗi thắng dài nhất",
+        "lossRun": "Chuỗi thua dài nhất",
+        "longestHold": "Lệnh giữ lâu nhất",
+        "topSymbol": "Sản phẩm giao dịch nhiều nhất",
+        "bestSymbol": "Sản phẩm lãi nhất",
+        "topSession": "Phiên giao dịch nhiều nhất",
+        "topWeekday": "Thứ giao dịch nhiều nhất",
+        "holdHours": "Tổng thời gian giữ lệnh cả năm"
+      },
+      "halves": "Nửa đầu và nửa sau",
+      "halvesNote": "Các dòng nhãn là số lệnh trên mỗi 100 lệnh; màu xanh nghĩa là nửa sau tốt hơn nửa đầu.",
+      "improved": "Tiến bộ nhiều nhất: \"{{name}}\" giảm từ {{a}} xuống {{b}} trên mỗi 100 lệnh.",
+      "heat": "Lịch lãi lỗ cả năm",
+      "tags": "Lệnh có vấn đề trong năm",
+      "badges": "Huy hiệu đạt được trong năm",
+      "badgeTimes": "{{n}} tháng",
+      "streaks": "Chuỗi kỷ luật dài nhất trong năm"
+    },
+    "card": {
+      "mine": "Báo cáo giao dịch của tôi",
+      "monthKind": "Báo cáo giao dịch tháng",
+      "annualKind": "Báo cáo giao dịch năm",
+      "showMoney": "Hiện số tiền",
+      "hideMoney": "Ẩn số tiền",
+      "shareMonth": "Chia sẻ báo cáo",
+      "shareAnnual": "Chia sẻ báo cáo năm"
+    },
+    "board": {
+      "title": "Bảng khách hàng",
+      "lead": "Chỉ tính khách hàng trực tiếp của bạn. Điểm lấy từ báo cáo tháng được lưu vào ngày 1; mức giảm là so sánh hai tháng gần nhất.",
+      "total": "Khách trực tiếp",
+      "withPersona": "Đã có tính cách",
+      "dropped": "Điểm giảm từ {{p}} trở lên",
+      "inactive": "{{d}} ngày không giao dịch",
+      "filter": {
+        "attention": "Cần chú ý",
+        "all": "Tất cả"
+      },
+      "empty": "Hiện không có khách hàng nào cần chú ý đặc biệt.",
+      "never": "Chưa có lệnh tài khoản thật",
+      "today": "Có giao dịch hôm nay",
+      "daysAgo": "Giao dịch {{n}} ngày trước",
+      "noPersona": "Chưa có tính cách",
+      "tagDropped": "Điểm giảm",
+      "tagInactive": "Ngừng giao dịch"
     }
   }
 }

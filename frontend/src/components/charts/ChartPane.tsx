@@ -572,6 +572,27 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
     void goToTime(focus.t1)
   }, [focus, focusTick, symbol, interval, hasData, chartRef, engine.candlesRef, goToTime])
 
+  // 「回放这一单」：从开仓前两根开始回放（选中的那根是最后一根可见的），之后用户自己点播放 / 单步。
+  // 回放期间这一单的标记照画，但开仓、平仓要等放到那一根才出现（见 FocusTradeLayer）。
+  // "Replay this trade": start two bars before the entry (the picked bar is the last visible one); the
+  // marker stays during the replay but entry and exit only appear once their bars are reached.
+  const [focusReplayId, setFocusReplayId] = useState<string | null>(null)
+  const startFocusReplay = useCallback(() => {
+    if (!focus) return
+    // 起点按时间算（开仓前两根的位置），不查已加载的 K 线：这一单多半比图上已有的数据早。
+    // 一根的宽度取最近几根里最小的间隔，避开周末那种大空档。
+    // The start is computed from time (two bars before the entry), not looked up in the loaded bars: the
+    // trade is usually older than what the chart holds. One bar = the smallest recent gap (skips weekends).
+    const times = getBarTimes()
+    let step = Infinity
+    for (let i = Math.max(1, times.length - 6); i < times.length; i++) step = Math.min(step, times[i] - times[i - 1])
+    if (!Number.isFinite(step) || step <= 0) step = 60
+    const startT = focus.t1 - 2 * step
+    setFocusReplayId(focus.id)
+    void replay.start(startT)
+  }, [focus, getBarTimes, replay])
+  const focusReplaying = replayActive && !!focus && focusReplayId === focus.id
+
   // 截图 / screenshot
   const takeShot = useCallback(async (mode: 'save' | 'copy') => {
     const c = chartRef.current
@@ -810,16 +831,18 @@ function ChartPane(p: Props, ref: React.Ref<ChartPaneHandle>) {
         <MeasureOverlay chart={chartRef.current!} series={seriesRef.current!} host={containerRef.current} armed={p.measureOn} onDone={p.onMeasureDone} decimals={decimals} barTimes={getBarTimes} colors={env.dirColors} />
       )}
       {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
-      {ready && focus && !replayActive && (
+      {ready && focus && (!replayActive || focusReplaying) && (
         <FocusTradeLayer
           chart={chartRef.current!}
           series={seriesRef.current!}
           trade={focus}
           barTimes={getBarTimes}
-          dataKey={`${interval}|${hasData}|${lastPrice}`}
+          dataKey={`${interval}|${hasData}|${lastPrice}|${replay.cursorTime ?? ''}`}
           drawable={!priceBased}
           fmtTime={drawFmtTime}
           onClose={() => p.onFocusClose?.()}
+          onReplay={replayActive || priceBased ? undefined : startFocusReplay}
+          replaying={focusReplaying}
         />
       )}
       {/* 财经事件徽章（主图底部；悬停 / 点按出卡片，卡片走 body portal）/ econ event badges (card in a body portal) */}

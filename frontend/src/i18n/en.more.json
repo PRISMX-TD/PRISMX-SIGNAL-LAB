@@ -2315,7 +2315,9 @@
     "focus": {
       "title": "Trade from your report",
       "noPrice": "This report was archived before fill prices were kept, so only the entry time is shown.",
-      "close": "Close"
+      "close": "Close",
+      "replay": "Replay this trade",
+      "replayHint": "Play bar by bar from just before the entry"
     }
   },
   "winrate": {
@@ -5677,7 +5679,13 @@
       "aiComment": "AI comment on monthly reports",
       "hint": "The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account). Written by DeepSeek with the same DEEPSEEK_API_KEY as the economic calendar.",
       "aiOn": "On",
-      "aiOff": "Off"
+      "aiOff": "Off",
+      "personaDemoPreview": "Demo persona preview",
+      "personaDemoPreviewHint": "When on, users without a live persona can preview one from their demo trades (persona only, no monthly report; the page and the share card are marked as a demo preview).",
+      "personaGoals": "Monthly goals + target persona",
+      "personaGoalsHint": "When on, users can set up to 3 monthly goals and a target persona in the report; the result is stored in the monthly report on the 1st. Meeting a goal carries no reward.",
+      "personaAgentBoard": "Ambassador customer board",
+      "personaAgentBoardHint": "When on, ambassadors allowed to view customer reports see their direct customers' persona mix, who went quiet and whose score dropped, above the customer list."
     }
   },
   "simulator": {
@@ -7710,6 +7718,193 @@
       "trend": "Score trend",
       "note": "Arrows compare with {{month}}.",
       "noteLive": "Arrows compare with {{month}}. The month is not over, so net P&L and trade count are compared once it is archived."
+    },
+    "week": {
+      "title": "Weekly digest",
+      "this": "This week",
+      "last": "Last week",
+      "range": "{{from}} – {{to}} (Monday to Sunday, UTC)",
+      "empty": "No closed trades in this week yet.",
+      "profit": "Net P&L",
+      "trades": "Trades",
+      "winRate": "Win rate",
+      "score": "Score",
+      "issue": "Most common issue",
+      "issueValue": "{{name}} × {{n}}",
+      "issueNone": "No flagged trades",
+      "topSymbol": "Most traded symbol",
+      "bestDay": "Best day",
+      "worstDay": "Worst day",
+      "vsLast": "Arrows compare with last week."
+    },
+    "streak": {
+      "title": "Discipline streaks",
+      "lead": "Habits only, not profit. Based on the last 90 days.",
+      "stops": "Trades with a stop loss",
+      "noHeldLoser": "No held losers",
+      "noRevenge": "No revenge sizing",
+      "noMovedStop": "No stop moved against you",
+      "unit": {
+        "trades": "{{n}} in a row",
+        "days": "{{n}} days"
+      },
+      "best": "Longest in 90 days: {{v}}",
+      "broken": "Broken on {{date}} after {{v}}"
+    },
+    "goal": {
+      "title": "This month's goals",
+      "titleArchived": "Goals for this month",
+      "set": "Set goals",
+      "edit": "Edit",
+      "empty": "No goals yet. Pick one or two things to get right this month and the report tracks them daily.",
+      "save": "Save",
+      "cancel": "Cancel",
+      "add": "Add a goal (up to {{n}})",
+      "remove": "Remove this goal",
+      "pick": "Pick a goal",
+      "target": "Target persona",
+      "targetNone": "None",
+      "targetNote": "Based on this month's direction: whether each axis would already sit on the target side if the month closed today.",
+      "axisMet": "Already \"{{pole}}\"",
+      "axisNeed": "{{from}} → needs \"{{pole}}\"",
+      "now": "now {{v}}",
+      "count": "{{n}}",
+      "unitCount": "trades",
+      "invalid": "The value for \"{{name}}\" is outside the allowed range.",
+      "editNote": "Goals stay in place until you change them. At the settlement on the 1st the result is saved into that month's report.",
+      "setAt": "Set on {{date}}",
+      "metric": {
+        "winRate": "Win rate",
+        "payoff": "Payoff ratio",
+        "score": "Score",
+        "maxDrawdown": "Max drawdown",
+        "trades": "Number of trades",
+        "unprotected": "Trades without a stop",
+        "heldLoser": "Held losers",
+        "revenge": "Revenge sizing",
+        "movedStop": "Stop moved against you"
+      },
+      "rule": {
+        "ge": "Goal: at least {{v}}",
+        "le": "Goal: at most {{v}}"
+      },
+      "dir": {
+        "ge": "at least",
+        "le": "at most"
+      },
+      "state": {
+        "met": "Met",
+        "unmet": "Missed",
+        "pending": "In progress",
+        "onTrack": "On track",
+        "over": "Exceeded"
+      }
+    },
+    "peers": {
+      "title": "Compared with your persona",
+      "leadCode": "Against {{n}} traders who are also \"{{name}}\".",
+      "leadFamily": "Not enough traders share your persona yet, so this compares with {{n}} traders in the \"{{family}}\" family.",
+      "you": "You",
+      "them": "Their median",
+      "note": "Both sides use the 90 days of the latest settlement. A reference only, not a ranking.",
+      "row": {
+        "medianHoldMin": "Median holding time",
+        "perDay": "Entries per trading day",
+        "payoff": "Payoff ratio",
+        "holdRatio": "Loser / winner holding time",
+        "signalShare": "Share of signal trades",
+        "manageShare": "Share with SL/TP edited after entry"
+      }
+    },
+    "alert": {
+      "title": "Daily loss alert",
+      "lead": "Set your own limit for the day. You get a notification when the loss reaches it. It only notifies: no order is blocked and nothing is closed for you.",
+      "limit": "Max loss today",
+      "on": "On",
+      "off": "Off",
+      "enable": "Turn on",
+      "update": "Update limit",
+      "disable": "Turn off",
+      "savedOn": "Saved. You will be notified when today's loss reaches this amount.",
+      "savedOff": "Alert turned off.",
+      "fired": "Already notified once today. It resets tomorrow.",
+      "note": "Counted per UTC day: today's closed live trades plus the floating P&L of open live positions. One alert per day.",
+      "invalid": "Enter an amount between 1 and 1,000,000."
+    },
+    "preview": {
+      "pill": "Demo preview",
+      "title": "On demo you are \"{{name}}\"",
+      "lead": "Computed from your last 90 days of demo trades with the same rules. It is a preview: go live and complete 20 entries to get your official persona and monthly reports.",
+      "progressTitle": "Preview your persona on demo",
+      "progressLead": "Demo trades can preview your trading persona under the same conditions as live.",
+      "share": "Share preview"
+    },
+    "annual": {
+      "chip": "{{y}} annual",
+      "title": "{{y}} annual trading report",
+      "none": "No annual report for this year yet.",
+      "empty": "No closed trades in this year.",
+      "preview": "Preview: the year so far. The official annual report comes out on January 1.",
+      "covers": "Covers {{from}} to {{to}} ({{n}} months)",
+      "net": "Net P&L in {{y}}",
+      "monthly": "Month by month",
+      "monthlyNote": "Bars are each month's net P&L; the number below is that month's score.",
+      "journey": "Your personas this year",
+      "journeySame": "You were \"{{name}}\" all year.",
+      "journeyChanged": "Your persona changed {{n}} times this year; you spent the longest as \"{{name}}\".",
+      "records": "Records of the year",
+      "record": {
+        "bestTrade": "Best trade",
+        "worstTrade": "Worst trade",
+        "bestDay": "Best day",
+        "worstDay": "Worst day",
+        "bestMonth": "Best month",
+        "busiestDay": "Busiest day",
+        "winRun": "Longest winning run",
+        "lossRun": "Longest losing run",
+        "longestHold": "Longest hold",
+        "topSymbol": "Most traded symbol",
+        "bestSymbol": "Most profitable symbol",
+        "topSession": "Busiest session",
+        "topWeekday": "Busiest weekday",
+        "holdHours": "Total time in positions"
+      },
+      "halves": "First half vs second half",
+      "halvesNote": "Tag rows are trades per 100; green means the second half was better.",
+      "improved": "Biggest improvement: \"{{name}}\" fell from {{a}} to {{b}} per 100 trades.",
+      "heat": "P&L calendar of the year",
+      "tags": "Flagged trades of the year",
+      "badges": "Badges earned this year",
+      "badgeTimes": "{{n}} months",
+      "streaks": "Longest discipline runs this year"
+    },
+    "card": {
+      "mine": "My trading report",
+      "monthKind": "Monthly trading report",
+      "annualKind": "Annual trading report",
+      "showMoney": "Show amounts",
+      "hideMoney": "Hide amounts",
+      "shareMonth": "Share report",
+      "shareAnnual": "Share annual report"
+    },
+    "board": {
+      "title": "Customer board",
+      "lead": "Direct customers only. Scores come from the monthly reports archived on the 1st; a drop compares the last two months.",
+      "total": "Direct customers",
+      "withPersona": "With a persona",
+      "dropped": "Score down {{p}}+",
+      "inactive": "No trade in {{d}} days",
+      "filter": {
+        "attention": "Needs attention",
+        "all": "All"
+      },
+      "empty": "No customer needs special attention right now.",
+      "never": "No live trade yet",
+      "today": "Traded today",
+      "daysAgo": "Traded {{n}} days ago",
+      "noPersona": "No persona yet",
+      "tagDropped": "Score dropped",
+      "tagInactive": "Gone quiet"
     }
   }
 }

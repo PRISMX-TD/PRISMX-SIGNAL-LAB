@@ -71,6 +71,12 @@ KIND_CHART_ALERT = "chart_alert"
 # frontend's notifFeed.<kind>. Sent only while the user switch is on and the archive ran on time.
 KIND_PERSONA_REPORT = "persona_report"
 KIND_PERSONA_CHANGED = "persona_changed"
+# 年度交易报告出炉（rev 58）：text 是年份，链接 /persona?annual=年份。
+# 每日亏损提醒（rev 58）：用户自己设的金额到了，text 是「今日盈亏 / 设的上限」，链接 /persona。
+# The annual report is out (text = the year) and the user's self-set daily loss alert fired
+# (text = "today's P&L / limit").
+KIND_PERSONA_ANNUAL = "persona_annual"
+KIND_LOSS_ALERT = "persona_loss_alert"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。

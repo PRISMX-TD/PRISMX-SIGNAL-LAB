@@ -86,20 +86,28 @@ def _save_state(db, user_id: str, persona: dict, now: datetime) -> PersonaState:
     return row
 
 
-def status(db, user_id: str, now: datetime | None = None) -> dict:
+def status(db, user_id: str, now: datetime | None = None, preview: bool = False) -> dict:
     """人格页的头部状态：demo（没下过实盘）/ locked（进度）/ unlocked（人格）。第一次够条件时就地算一次存下。
-    Header state: demo / locked (with progress) / unlocked (with persona). Computed and stored on first unlock."""
+    preview：「模拟盘预览人格」开着时，没解锁的人额外带一个用模拟盘的单算出来的人格（或模拟盘上的进度）。
+    Header state: demo / locked (with progress) / unlocked (with persona). Computed and stored on first unlock.
+    With preview, users who aren't unlocked also get a persona computed from their demo trades."""
     now = now or utcnow()
     row = db.query(PersonaState).filter(PersonaState.user_id == user_id).first()
     if row is not None:
         return {"status": "unlocked", "persona": _state_dict(row)}
+
+    def with_preview(st: dict) -> dict:
+        if preview:
+            from app.services.persona import extras
+            st["preview"] = extras.demo_preview(db, user_id, now)
+        return st
     if not has_real_orders(db, user_id):
-        return {"status": "demo"}
+        return with_preview({"status": "demo"})
     since, until = _window(now)
     positions = load_positions(db, user_id, since, until)
     progress = engine.unlock_status(positions)
     if not progress["unlocked"]:
-        return {"status": "locked", "progress": progress}
+        return with_preview({"status": "locked", "progress": progress})
     persona = engine.compute_persona(positions)
     row = _save_state(db, user_id, persona, now)
     db.commit()
@@ -244,13 +252,17 @@ def _outlook(state: PersonaState | None, positions) -> dict | None:
     }
 
 
-def report_for(db, user_id: str, period: str, now: datetime | None = None, open_rows=None) -> dict | None:
+def report_for(db, user_id: str, period: str, now: datetime | None = None, open_rows=None,
+               goals: bool = False) -> dict | None:
     """某个月的报告：存档过的读存档；当月实时算；更早又没存档的返回 None。
     open_rows：此刻的持仓快照（connection_manager 的行）。给了的话，当月报告会带上「还没计入的浮亏」
     和「如果今天结算」的人格走向；已存档的月份用不到。
     Archived months come from the archive, the current month is computed live, other months are None.
     open_rows is the live positions snapshot: with it the live month also carries the floating loss not
-    yet counted and the persona outlook; archived months ignore it."""
+    yet counted and the persona outlook; archived months ignore it.
+    当月报告另带本周 / 上周小结和纪律连续记录；goals（「本月目标」开关）开着时再带目标的达标情况。
+    The live month also carries this / last week's digest and the discipline streaks, plus the goals'
+    standing when goals (the monthly-goals switch) is on."""
     now = now or utcnow()
     row = (db.query(PersonaReport)
              .filter(PersonaReport.user_id == user_id, PersonaReport.period == period).first())
@@ -271,13 +283,19 @@ def report_for(db, user_id: str, period: str, now: datetime | None = None, open_
     rep["floating"] = ({"count": len(losers), "loss": round(sum(p.profit for p in losers), 2)}
                        if losers else None)
     rep["outlook"] = _outlook(st, window + losers)
+    from app.services.persona import extras
+    rep["weeks"] = extras.weeks(window, now)
+    rep["streaks"] = extras.streaks(window, now)
+    if goals:
+        axes = (rep["outlook"] or {}).get("axes") or (persona or {}).get("axes")
+        rep["goal"] = extras.goal_block(db, user_id, rep, axes)
     _attach_history(db, user_id, period, rep)
     return rep
 
 
 # ---------------------------------------------------------------- 月底存档 / month-end archive
 def archive_user(db, user_id: str, period: str, now: datetime, open_rows=None,
-                 ai_enabled: bool = False) -> PersonaReport | None:
+                 ai_enabled: bool = False, goals: bool = False) -> PersonaReport | None:
     """把 period 那个月存档，并用最近 90 天重算人格。没解锁的人不存档。已存过的直接返回。
     Archive `period` and recompute the persona over the last 90 days. Skips users who aren't unlocked."""
     existing = (db.query(PersonaReport)
@@ -300,6 +318,11 @@ def archive_user(db, user_id: str, period: str, now: datetime, open_rows=None,
     persona_d = _state_dict(state)
     rep = build_report(db, user_id, period, cut, persona_d, extra_positions=losers, window_positions=window)
     rep["live"] = False
+    if goals:
+        # 「本月目标」开着：把这个月的达标情况一起存进去（用户设的目标一直沿用，所以存的是结果）
+        # Monthly goals on: freeze this month's standing into the archive.
+        from app.services.persona import extras
+        rep["goal"] = extras.goal_block(db, user_id, rep, persona_d.get("axes"))
     row = PersonaReport(user_id=user_id, period=period, code=persona_d["code"],
                         report_json=json.dumps(rep, ensure_ascii=False), ai_status="off",
                         archived_at=now.replace(tzinfo=None))

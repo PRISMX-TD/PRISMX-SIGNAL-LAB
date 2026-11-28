@@ -255,11 +255,16 @@ EVENT_CHART_ALERT = "chart_alert"
 # The monthly trading report is out (2026-11-27): once a month, only to users who have one; always on,
 # so stored whitelists need no migration.
 EVENT_PERSONA_REPORT = "persona_report"
+# 每日亏损提醒（rev 58）：金额和开关都是用户自己在交易报告里设的，进 ALWAYS_ON_EVENTS。年度报告出炉沿用
+# persona_report 这个事件。
+# The daily loss alert (rev 58): limit and switch are set by the user in the trading report, so it is
+# always on. The annual report reuses persona_report.
+EVENT_LOSS_ALERT = "loss_alert"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
     EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER, EVENT_LUCKY_WHEEL,
-    EVENT_ECON_ALERT, EVENT_CHART_ALERT, EVENT_PERSONA_REPORT,
+    EVENT_ECON_ALERT, EVENT_CHART_ALERT, EVENT_PERSONA_REPORT, EVENT_LOSS_ALERT,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知

@@ -956,6 +956,9 @@ _SETTINGS_KEY_MAP = {
     "featured_competition_id": "featuredCompetitionId",
     "persona_visible": "personaVisible",
     "persona_ai_comment": "personaAiComment",
+    "persona_demo_preview": "personaDemoPreview",
+    "persona_goals": "personaGoals",
+    "persona_agent_board": "personaAgentBoard",
 }
 
 
@@ -1006,6 +1009,12 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
         patch["persona_visible"] = bool(body.personaVisible)
     if "personaAiComment" in sent:
         patch["persona_ai_comment"] = bool(body.personaAiComment)
+    if "personaDemoPreview" in sent:
+        patch["persona_demo_preview"] = bool(body.personaDemoPreview)
+    if "personaGoals" in sent:
+        patch["persona_goals"] = bool(body.personaGoals)
+    if "personaAgentBoard" in sent:
+        patch["persona_agent_board"] = bool(body.personaAgentBoard)
     if "competitionsPublicEnabled" in sent:
         patch["competitions_public_enabled"] = bool(body.competitionsPublicEnabled)
     if "featuredCompetitionId" in sent:

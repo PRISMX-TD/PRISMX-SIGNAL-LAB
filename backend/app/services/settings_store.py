@@ -974,6 +974,15 @@ GAMIFICATION_DEFAULTS: dict = {
     # 月底存档时让 AI 写一段点评（只发匿名的汇总数字，不发账号、昵称、单号）；由 DeepSeek 写；默认关，没配 DEEPSEEK_API_KEY 时也不写。
     # AI comment written at month-end archive (anonymous aggregates only); written by DeepSeek; off by default, skipped without DEEPSEEK_API_KEY.
     "persona_ai_comment": False,
+    # 交易报告新功能的三个开关（2026-11-28），都默认关，管理员不受限制：
+    # persona_demo_preview —— 没解锁的人用模拟盘的单预览人格（只给人格，不给月报）；
+    # persona_goals —— 本月目标 + 目标人格；
+    # persona_agent_board —— 推荐官的客户看板（还要求该推荐官有「看客户报告」的权限）。
+    # Three switches for the report additions (2026-11-28), all off by default, admins unaffected:
+    # demo persona preview, monthly goals + target persona, the ambassador customer board.
+    "persona_demo_preview": False,
+    "persona_goals": False,
+    "persona_agent_board": False,
 }
 
 _gamification_cache = _TtlCache()

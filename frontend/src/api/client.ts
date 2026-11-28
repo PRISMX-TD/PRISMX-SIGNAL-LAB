@@ -12,7 +12,7 @@ import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailCont
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { AdminAgentTree, AgentTeam, AgentTreeUser, AgentTreeUsers } from './types'
-import type { PersonaClient, PersonaOverview, PersonaReport } from './personaTypes'
+import type { PersonaAlert, PersonaAnnual, PersonaBoard, PersonaClient, PersonaOverview, PersonaReport } from './personaTypes'
 import type { AdminUserOverview } from './supportTypes'
 import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
@@ -1528,6 +1528,14 @@ export const personaApi = {
     request<PersonaOverview & { client: PersonaClient }>('/persona/client', { method: 'POST', body: JSON.stringify({ email }) }),
   clientReport: (email: string, period: string) =>
     request<{ client: PersonaClient; report: PersonaReport }>('/persona/client', { method: 'POST', body: JSON.stringify({ email, period }) }),
+  // 2026-11-28（rev 58）：本月目标、每日亏损提醒、年度报告、推荐官客户看板
+  // Monthly goals, the daily loss alert, the annual report and the ambassador customer board.
+  setGoal: (goals: { key: string; target: number }[], targetCode: string | null) =>
+    request<{ ok: boolean }>('/persona/me/goal', { method: 'PUT', body: JSON.stringify({ goals, targetCode }) }),
+  setAlert: (limit: number | null, enabled: boolean) =>
+    request<PersonaAlert>('/persona/me/alert', { method: 'PUT', body: JSON.stringify({ limit, enabled }) }),
+  annual: (year: number) => request<PersonaAnnual>(`/persona/me/annual?year=${year}`),
+  clients: () => request<PersonaBoard>('/persona/clients'),
 }
 
 export const luckyApi = {

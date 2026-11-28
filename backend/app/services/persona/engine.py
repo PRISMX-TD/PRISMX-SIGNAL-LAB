@@ -455,3 +455,133 @@ def calendar(positions) -> list[dict]:
         acc[k]["profit"] += p.profit
         acc[k]["trades"] += 1
     return [{"day": k, "profit": round(v["profit"], 2), "trades": v["trades"]} for k, v in sorted(acc.items())]
+
+
+# ---------------------------------------------------------------- 周小结 / weekly digest (2026-11-28)
+def week_start(dt):
+    """dt 所在那一周的周一 00:00（UTC）。/ Monday 00:00 UTC of dt's week."""
+    d = dt - timedelta(days=dt.weekday())
+    return d.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def week_digest(positions, tags: dict, start, end) -> dict:
+    """[start, end) 里平仓的单的一周小结：几项成绩、各标签几笔、做得最多的品种、最好和最差的一天。
+    One week's digest over positions closed in [start, end)."""
+    ps = [p for p in positions if not p.unrealized and start <= p.close_at < end]
+    sm = summary(ps)
+    days = calendar(ps)
+    counts = {t: 0 for t in TAGS}
+    for p in ps:
+        for t in tags.get((p.login, p.ticket), []):
+            counts[t] += 1
+    sym = _bucket(ps, lambda p: p.symbol)
+    return {
+        "start": start.date().isoformat(),
+        "end": (end - timedelta(days=1)).date().isoformat(),
+        "summary": {k: sm[k] for k in ("trades", "wins", "losses", "winRate", "profit", "payoff", "score",
+                                       "tradingDays", "greenDays", "maxDrawdown", "medianHoldMin")},
+        "tags": counts,
+        "topSymbol": sym[0] if sym else None,
+        "bestDay": max(days, key=lambda d: d["profit"]) if days else None,
+        "worstDay": min(days, key=lambda d: d["profit"]) if days else None,
+    }
+
+
+# ---------------------------------------------------------------- 纪律连续记录 / discipline streaks
+# 奖励的是习惯，不是盈利：连续多少笔带止损、连续多少天没有扛单 / 报复加仓 / 反向挪止损。
+# Habits, not profit: trades in a row with a stop, days in a row without a held loser / revenge / moved stop.
+STREAK_DAY_TAGS = (("noHeldLoser", "heldLoser"), ("noRevenge", "revenge"), ("noMovedStop", "movedStop"))
+STREAK_BROKEN_DAYS = 7           # 最近 7 天内断的才提示 / only breaks in the last 7 days are surfaced
+STREAK_BROKEN_MIN_DAYS = 3       # 断之前至少连续这么多天才值得一提 / the run before must be at least this long
+STREAK_BROKEN_MIN_TRADES = 5
+
+
+def streaks(positions, tags: dict, now) -> list[dict]:
+    """当前连续记录、窗口内最长记录，以及最近有没有断过。positions 一般是最近 90 天的。
+    Current run, best run in the window and a recent break, per habit."""
+    closed = sorted((p for p in positions if not p.unrealized), key=lambda p: p.close_at)
+    if not closed:
+        return []
+    out: list[dict] = []
+    # 连续带止损的笔数 / trades in a row with a stop
+    cur = best = 0
+    last_break = None                # (断的时刻, 断之前连续了几笔) / (when it broke, the run before it)
+    for p in closed:
+        if "unprotected" in tags.get((p.login, p.ticket), []):
+            last_break = (p.close_at, cur)
+            cur = 0
+        else:
+            cur += 1
+            best = max(best, cur)
+    broken = None
+    if (last_break and last_break[1] >= STREAK_BROKEN_MIN_TRADES
+            and (now - last_break[0]) <= timedelta(days=STREAK_BROKEN_DAYS)):
+        broken = {"at": last_break[0].isoformat(), "length": last_break[1]}
+    out.append({"key": "stops", "unit": "trades", "current": cur, "best": best, "broken": broken})
+    first = min(p.open_at for p in closed)
+    for key, tag in STREAK_DAY_TAGS:
+        offenders = [p.close_at for p in closed if tag in tags.get((p.login, p.ticket), [])]
+        marks = [first] + offenders
+        gaps = [(b - a).days for a, b in zip(marks, marks[1:])]
+        current = max(0, (now - marks[-1]).days)
+        broken = None
+        if offenders and gaps[-1] >= STREAK_BROKEN_MIN_DAYS and (now - offenders[-1]) <= timedelta(days=STREAK_BROKEN_DAYS):
+            broken = {"at": offenders[-1].isoformat(), "length": gaps[-1]}
+        out.append({"key": key, "unit": "days", "current": current, "best": max(gaps + [current]), "broken": broken})
+    return out
+
+
+# ---------------------------------------------------------------- 本月目标 / monthly goals
+# 目标清单：键 → (方向, 下限, 上限)。ge = 做到这个数以上才算达标，le = 不超过这个数。
+# Goal menu: key → (direction, min, max). ge = reach at least the target, le = stay at or below it.
+GOAL_METRICS = {
+    "winRate": ("ge", 0.2, 0.95),
+    "payoff": ("ge", 0.3, 10.0),
+    "score": ("ge", 20, 100),
+    "maxDrawdown": ("le", 1, 1_000_000),
+    "trades": ("le", 1, 5000),
+    "unprotected": ("le", 0, 500),
+    "heldLoser": ("le", 0, 500),
+    "revenge": ("le", 0, 500),
+    "movedStop": ("le", 0, 500),
+}
+GOALS_MAX = 3
+
+
+def goal_value(key: str, report: dict):
+    if key in TAGS:
+        return ((report.get("tags") or {}).get(key) or {}).get("count", 0)
+    return (report.get("summary") or {}).get(key)
+
+
+def evaluate_goals(goals: list[dict], report: dict) -> list[dict]:
+    """每个目标现在的数值和是否达标。没有成交时 ge 类目标没有数值，算未达标。
+    Each goal's current value and whether it is met; ge goals have no value (unmet) without trades."""
+    out = []
+    for g in goals or []:
+        key = g.get("key")
+        if key not in GOAL_METRICS:
+            continue
+        direction = GOAL_METRICS[key][0]
+        target = g.get("target")
+        value = goal_value(key, report)
+        if value is None or target is None:
+            met = False
+        else:
+            met = value >= target if direction == "ge" else value <= target
+        out.append({"key": key, "dir": direction, "target": target, "value": value, "met": bool(met)})
+    return out
+
+
+def target_progress(target_code: str | None, axes: dict | None) -> dict | None:
+    """目标人格：四个主轴各自现在的字母和想要的字母。axes 是 compute_persona 的 axes（或月报走向里的）。
+    Target persona: per axis, the letter held now against the letter wanted."""
+    if target_code not in CODES or not axes:
+        return None
+    rows = []
+    for i, axis in enumerate(AXES):
+        a = axes.get(axis) or {}
+        rows.append({"axis": axis, "want": target_code[i], "have": a.get("letter"), "value": a.get("value"),
+                     "met": a.get("letter") == target_code[i]})
+    return {"code": target_code, "family": FAMILIES[target_code[:2]], "axes": rows,
+            "reached": all(r["met"] for r in rows)}

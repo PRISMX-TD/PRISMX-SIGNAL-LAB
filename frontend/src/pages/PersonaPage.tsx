@@ -7,6 +7,12 @@
 // 2026-11-27 补的几块：四个主轴下面的「本月走向」（如果今天结算会是什么人格）、当月还没计入的
 // 浮亏、各项数字「比上月」的升降和近几个月的评分走势、标签单 / 最好最差单点了跳到图表上看那一单
 // （只在看自己的报告时能点）。这些字段旧存档可能没有，没有就不显示那一块。
+// 2026-11-28 再补（rev 58）：当月报告里的本周 / 上周小结、纪律连续记录、本月目标 + 目标人格；人格下面的
+// 「和同人格的人比」；自设的每日亏损提醒；没解锁时的模拟盘预览人格；月份那一排多出的「年度报告」；
+// 月报 / 年度报告分享卡。面板本身在 components/persona/ReportExtras.tsx 和 AnnualReport.tsx 里。
+// Added 2026-11-28: weekly digest, discipline streaks, monthly goals, same-persona comparison, the daily
+// loss alert, the demo persona preview, the annual report and report share cards (panels live in
+// components/persona/ReportExtras.tsx and AnnualReport.tsx).
 // 2026-11-22 视觉重做：动效只有进场一次（滚到才出现、数字滚动、曲线展开），没有常驻动画；
 // prefers-reduced-motion 下全部直接显示。
 //
@@ -26,33 +32,28 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { personaApi } from '../api/client'
-import type { Persona, PersonaBucket, PersonaOutlook, PersonaOverview, PersonaPrevious, PersonaProgress, PersonaReport, PersonaTag, PersonaTradeRef } from '../api/personaTypes'
+import type { Persona, PersonaAnnual, PersonaBucket, PersonaFeatures, PersonaOutlook, PersonaOverview, PersonaPrevious, PersonaPreview, PersonaProgress, PersonaReport, PersonaTag, PersonaTradeRef } from '../api/personaTypes'
 import { localizeApiError } from '../api/utils'
 import { LOCALE_TAG, currentLang } from '../i18n'
+import { useAuth } from '../store/auth'
 import PageHead from '../components/PageHead'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { SkeletonLine } from '../components/Skeleton'
 import { AXES, FAMILY_COLOR, PERSONA_CODES, artUrl, familyOf, readArtStyle, writeArtStyle, type ArtStyle } from '../components/persona/personaMeta'
 import { focusFromRef } from '../components/charts/trade/focusTrade'
+import AnnualReport from '../components/persona/AnnualReport'
+import { DemoPreview, GoalPanel, LossAlertCard, PeersPanel, Streaks, WeekDigest } from '../components/persona/ReportExtras'
+import { dayLabel, fmtMinutes, money, monthLabel, num, pct, shortMoney, tone, type T } from '../components/persona/fmt'
 import { onRovingKeyDown } from '../utils/rovingTabs'
 import { EMPTY } from '../utils/format'
 import '../components/persona/persona.css'
 
-type ClientState = { email?: string; name?: string } | null
+type ClientState = { email?: string; name?: string; annual?: number } | null
 type BreakKey = 'symbol' | 'session' | 'weekday' | 'hold' | 'source'
-type T = (k: string, o?: Record<string, unknown>) => string
 const BREAKS: BreakKey[] = ['symbol', 'session', 'hold', 'weekday', 'source']
 const TAGS: PersonaTag[] = ['unprotected', 'heldLoser', 'earlyExit', 'movedStop', 'revenge', 'stoppedOut']
 const TAGGED_SHOWN = 8
 
-const money = (v: number | null | undefined, sign = true) => {
-  if (v == null || !Number.isFinite(v)) return EMPTY
-  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return `${sign ? (v > 0 ? '+' : v < 0 ? '−' : '') : v < 0 ? '−' : ''}$${s}`
-}
-const pct = (v: number | null | undefined, digits = 0) => (v == null || !Number.isFinite(v) ? EMPTY : `${(v * 100).toFixed(digits)}%`)
-const num = (v: number | null | undefined, digits = 2) => (v == null || !Number.isFinite(v) ? EMPTY : v.toFixed(digits))
-const tone = (v: number | null | undefined) => (v == null ? '' : v > 0 ? 'is-up' : v < 0 ? 'is-down' : '')
 const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
 // ---------------------------------------------------------------- 进场动效 / entrance motion
@@ -158,6 +159,15 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
   const [style, setStyle] = useState<ArtStyle>(readArtStyle)
   const [share, setShare] = useState<ShareSpec | null>(null)
   const [sharing, setSharing] = useState(false)
+  // 年度报告：选中的年份（null = 在看月报）、已取回的各年报告。通知链接会带着年份进来（路由 state）。
+  // Annual report: the year in view (null = monthly) and the fetched years; the notification link
+  // arrives with the year in the router state.
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+  const wantAnnual = mode === 'self' ? ((location.state as ClientState)?.annual ?? null) : null
+  const [annualYear, setAnnualYear] = useState<number | null>(wantAnnual)
+  const [annuals, setAnnuals] = useState<Record<number, PersonaAnnual | 'none'>>({})
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (mode === 'client' && !clientEmail) {
@@ -170,8 +180,8 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
       if (!alive) return
       setOverview(o)
       if (o.status === 'unlocked' && o.report) {
-        setPeriod(o.report.period)
-        setReports({ [o.report.period]: o.report })
+        setPeriod((cur) => cur ?? o.report!.period)
+        setReports((m) => ({ ...m, [o.report!.period]: o.report! }))
       }
     }).catch((e: unknown) => {
       if (!alive) return
@@ -181,9 +191,20 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
     })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, clientEmail])
+  }, [mode, clientEmail, reloadKey])
+
+  useEffect(() => {
+    if (annualYear == null || annuals[annualYear] || mode !== 'self') return
+    let alive = true
+    const y = annualYear
+    personaApi.annual(y)
+      .then((r) => { if (alive) setAnnuals((m) => ({ ...m, [y]: r })) })
+      .catch(() => { if (alive) setAnnuals((m) => ({ ...m, [y]: 'none' })) })
+    return () => { alive = false }
+  }, [annualYear, annuals, mode])
 
   const pickMonth = useCallback((p: string) => {
+    setAnnualYear(null)
     setPeriod(p)
     if (reports[p]) return
     setLoadingMonth(true)
@@ -200,16 +221,60 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
 
   const persona = overview?.status === 'unlocked' ? overview.persona : null
   const report = period ? reports[period] : null
+  const features: PersonaFeatures | undefined = overview?.features
+  const annual = annualYear != null ? annuals[annualYear] : undefined
+  // 月份那一排前面的年度入口：存好的年份；管理员多一个「今年」（预览到目前为止的）。
+  // Year chips ahead of the months: archived years, plus the running year for admins (a live preview).
+  const yearChips = useMemo(() => {
+    if (mode !== 'self' || overview?.status !== 'unlocked') return []
+    const ys = new Set<number>(overview.annuals ?? [])
+    if (isAdmin) ys.add(new Date().getUTCFullYear())
+    if (wantAnnual != null) ys.add(wantAnnual)
+    return [...ys].sort((a, b) => b - a)
+  }, [mode, overview, isAdmin, wantAnnual])
 
-  const openShare = async () => {
-    if (!persona || sharing) return
+  // 改了目标之后重新取一遍（后端已清掉那 60 秒缓存）。/ Refetch after a goal change (the backend dropped its cache).
+  const reload = useCallback(() => setReloadKey((k) => k + 1), [])
+
+  const openShare = async (who?: Persona, tag?: string) => {
+    const target = who ?? persona
+    if (!target || sharing) return
     setSharing(true)
     try {
       const { buildPersonaCard } = await import('../components/persona/personaCard')
-      const build = await buildPersonaCard(t, persona, style)
+      const build = await buildPersonaCard(t, target, style, tag)
       setShare({ type: 'D', variants: [{ key: 'p', label: '', input: {} }], custom: { title: t('persona.share.title'), fileStem: 'persona', build } })
     } catch (e) {
       console.error('persona share card failed', e)
+      setErr(t('share.failed'))
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  // 月报 / 年度报告分享卡：两种版式，显示金额或隐藏金额。/ Report share card with money shown or hidden.
+  const openReportShare = async (kind: 'month' | 'year') => {
+    if (sharing) return
+    const src = kind === 'year' ? (annual && annual !== 'none' ? annual : null) : report
+    if (!src) return
+    setSharing(true)
+    try {
+      const { buildReportCard } = await import('../components/persona/reportCard')
+      const build = await buildReportCard(t, {
+        when: kind === 'year' ? String((src as PersonaAnnual).year) : monthLabel((src as PersonaReport).period, i18n.language),
+        kind: t(kind === 'year' ? 'persona.card.annualKind' : 'persona.card.monthKind'),
+        summary: src.summary,
+        code: src.persona?.code ?? persona?.code ?? null,
+        badges: kind === 'year' ? [] : (src as PersonaReport).badges,
+        style,
+      })
+      setShare({
+        type: 'D',
+        variants: [{ key: 'show', label: t('persona.card.showMoney'), input: {} }, { key: 'hide', label: t('persona.card.hideMoney'), input: {} }],
+        custom: { title: t(kind === 'year' ? 'persona.card.shareAnnual' : 'persona.card.shareMonth'), fileStem: kind === 'year' ? 'annual' : 'report', build },
+      })
+    } catch (e) {
+      console.error('report share card failed', e)
       setErr(t('share.failed'))
     } finally {
       setSharing(false)
@@ -252,7 +317,7 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
         <>
           <div className="pr-slab">
             <PersonaStage persona={persona} style={style} onStyle={pickStyle} change={report?.change ?? null}
-              onShare={mode === 'self' ? openShare : undefined} sharing={sharing} />
+              onShare={mode === 'self' ? () => void openShare() : undefined} sharing={sharing} />
             <Spectrum persona={persona} />
             {overview.report?.outlook && <Outlook persona={persona} outlook={overview.report.outlook} />}
           </div>
@@ -260,27 +325,57 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
             <div className="pr-st-head">
               <div>
                 <p className="pr-kicker">{t('persona.report.title')}</p>
-                <h2 id="pr-month-h" className="pr-st-month">{period ? monthLabel(period, i18n.language, 'long') : t('persona.report.title')}</h2>
+                <h2 id="pr-month-h" className="pr-st-month">
+                  {annualYear != null ? t('persona.annual.title', { y: annualYear }) : period ? monthLabel(period, i18n.language, 'long') : t('persona.report.title')}
+                </h2>
               </div>
               <div className="pr-months" role="tablist" aria-label={t('persona.report.title')} onKeyDown={onRovingKeyDown}>
-                {overview.months.map((m) => (
-                  <button key={m} type="button" role="tab" aria-selected={m === period} tabIndex={m === period ? 0 : -1}
-                    className={`pr-chip ${m === period ? 'on' : ''}`} onClick={() => pickMonth(m)}>
-                    {monthLabel(m, i18n.language)}
+                {yearChips.map((y) => (
+                  <button key={y} type="button" role="tab" aria-selected={y === annualYear} tabIndex={y === annualYear ? 0 : -1}
+                    className={`pr-chip is-year ${y === annualYear ? 'on' : ''}`} onClick={() => setAnnualYear(y)}>
+                    {t('persona.annual.chip', { y })}
                   </button>
                 ))}
+                {overview.months.map((m) => {
+                  const on = annualYear == null && m === period
+                  return (
+                    <button key={m} type="button" role="tab" aria-selected={on} tabIndex={on ? 0 : -1}
+                      className={`pr-chip ${on ? 'on' : ''}`} onClick={() => pickMonth(m)}>
+                      {monthLabel(m, i18n.language)}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             {err && <p className="pr-err" role="alert">{err}</p>}
-            {loadingMonth && !report ? (
+            {annualYear != null ? (
+              annual === 'none' ? <div className="pr-slab pr-empty">{t('persona.annual.none')}</div>
+                : annual ? <AnnualReport key={annual.year} rep={annual} style={style} canOpen={mode === 'self'} onShare={() => void openReportShare('year')} sharing={sharing} />
+                  : <div className="pr-slab pr-month-skel"><SkeletonLine width="30%" /><SkeletonLine width="60%" /><SkeletonLine width="80%" /></div>
+            ) : loadingMonth && !report ? (
               <div className="pr-slab pr-month-skel"><SkeletonLine width="30%" /><SkeletonLine width="60%" /><SkeletonLine width="80%" /></div>
-            ) : report ? <MonthReport key={report.period} report={report} canOpen={mode === 'self'} /> : null}
+            ) : report ? (
+              <MonthReport key={report.period} report={report} canOpen={mode === 'self'} features={features} onReload={reload}
+                onShare={mode === 'self' ? () => void openReportShare('month') : undefined} sharing={sharing} />
+            ) : null}
           </section>
+          {(overview.peers || (mode === 'self' && overview.alert)) && (
+            <div className={overview.peers && mode === 'self' && overview.alert ? 'pr-grid2' : 'pr-grid1'}>
+              {overview.peers && <Rv className="pr-panel"><PeersPanel peers={overview.peers} persona={persona} /></Rv>}
+              {mode === 'self' && overview.alert && <Rv className="pr-panel" i={1}><LossAlertCard alert={overview.alert} /></Rv>}
+            </div>
+          )}
         </>
       ) : overview.status === 'locked' ? (
-        <LockedHero progress={overview.progress} client={mode === 'client'} />
+        <>
+          <LockedHero progress={overview.progress} client={mode === 'client'} />
+          {mode === 'self' && overview.preview && <PreviewBlock preview={overview.preview} style={style} sharing={sharing} onShare={(p) => void openShare(p, t('persona.preview.pill'))} />}
+        </>
       ) : (
-        <DemoHero client={mode === 'client'} />
+        <>
+          <DemoHero client={mode === 'client'} />
+          {mode === 'self' && overview.preview && <PreviewBlock preview={overview.preview} style={style} sharing={sharing} onShare={(p) => void openShare(p, t('persona.preview.pill'))} />}
+        </>
       )}
       <Intro current={persona?.code ?? null} style={style} />
       <p className="pr-note">{t('persona.note')}</p>
@@ -289,27 +384,14 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
   )
 }
 
-function intlTag(lang: string) {
-  const tag = LOCALE_TAG[currentLang()] ?? lang
-  return tag.startsWith('th') ? `${tag}-u-ca-gregory` : tag
-}
-
-function monthLabel(period: string, lang: string, month: 'short' | 'long' = 'short') {
-  const [y, m] = period.split('-').map(Number)
-  try {
-    return new Intl.DateTimeFormat(intlTag(lang), { year: 'numeric', month, timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)))
-  } catch {
-    return period
-  }
-}
-
-function dayLabel(period: string, day: number, lang: string) {
-  const [y, m] = period.split('-').map(Number)
-  try {
-    return new Intl.DateTimeFormat(intlTag(lang), { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, day)))
-  } catch {
-    return `${m}-${day}`
-  }
+// 模拟盘预览：给预览出来的人格套上它自己的家族色。/ The demo preview, tinted with its own family colour.
+function PreviewBlock({ preview, style, sharing, onShare }: { preview: PersonaPreview; style: ArtStyle; sharing: boolean; onShare: (p: Persona) => void }) {
+  const fam = preview.unlocked ? FAMILY_COLOR[familyOf(preview.persona.code)] : null
+  return (
+    <div style={fam ? ({ '--fam': fam.main, '--fam-deep': fam.deep } as React.CSSProperties) : undefined}>
+      <DemoPreview preview={preview} style={style} sharing={sharing} onShare={onShare} />
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------- 人格舞台 / persona stage
@@ -611,7 +693,9 @@ function TradeLink({ trade, className, children }: { trade: PersonaTradeRef | nu
   )
 }
 
-function MonthReport({ report, canOpen }: { report: PersonaReport; canOpen: boolean }) {
+function MonthReport({ report, canOpen, features, onReload, onShare, sharing }: {
+  report: PersonaReport; canOpen: boolean; features?: PersonaFeatures; onReload: () => void; onShare?: () => void; sharing: boolean
+}) {
   const { t, i18n } = useTranslation()
   const s = report.summary
   const lang = (i18n.language || 'zh').slice(0, 2) as 'zh' | 'en' | 'ja' | 'th' | 'vi'
@@ -636,7 +720,14 @@ function MonthReport({ report, canOpen }: { report: PersonaReport; canOpen: bool
   const winShare = s.wins + s.losses ? s.wins / (s.wins + s.losses) : 0
   return (
     <div className="pr-month">
-      {report.live && <p className="pr-live"><span className="pr-live-dot" aria-hidden="true" />{t('persona.report.live')}</p>}
+      <div className="pr-month-top">
+        {report.live ? <p className="pr-live"><span className="pr-live-dot" aria-hidden="true" />{t('persona.report.live')}</p> : <span />}
+        {onShare && (
+          <button type="button" className="pr-link" onClick={onShare} disabled={sharing}>
+            {sharing ? t('share.generating') : t('persona.card.shareMonth')}
+          </button>
+        )}
+      </div>
 
       <Rv className={`pr-slab pr-headline ${s.profit > 0 ? 'tone-up' : s.profit < 0 ? 'tone-down' : ''}`}>
         <div className="pr-pnl">
@@ -686,6 +777,16 @@ function MonthReport({ report, canOpen }: { report: PersonaReport; canOpen: bool
       )}
       {report.openLosers > 0 && <p className="pr-small">{t('persona.report.openLosers', { n: report.openLosers })}</p>}
 
+      {(report.goal || (canOpen && report.live && features?.goals)) && (
+        <Rv className="pr-panel"><GoalPanel goal={report.goal} features={features} live={report.live} canEdit={canOpen} onSaved={onReload} /></Rv>
+      )}
+      {report.weeks && report.weeks.length > 0 && (
+        <div className={report.streaks && report.streaks.length > 0 ? 'pr-grid2 is-even' : 'pr-grid1'}>
+          <Rv className="pr-panel"><WeekDigest weeks={report.weeks} /></Rv>
+          {report.streaks && report.streaks.length > 0 && <Rv className="pr-panel" i={1}><Streaks streaks={report.streaks} /></Rv>}
+        </div>
+      )}
+
       <div className="pr-grid2">
         <Rv className="pr-panel"><Calendar report={report} /></Rv>
         <Rv className="pr-panel" i={1}><Breakdowns report={report} /></Rv>
@@ -711,12 +812,6 @@ function MonthReport({ report, canOpen }: { report: PersonaReport; canOpen: bool
       </div>
     </div>
   )
-}
-
-function fmtMinutes(t: T, m: number) {
-  if (m < 1) return t('persona.unit.sec', { n: Math.max(1, Math.round(m * 60)) })
-  if (m < 90) return t('persona.unit.min', { n: Math.round(m) })
-  return t('persona.unit.hour', { n: (m / 60).toFixed(1) })
 }
 
 // 当月累计盈亏曲线：按 UTC 日把每天的已平仓盈亏累加，进行中的月份只画到今天。
@@ -837,12 +932,6 @@ function Calendar({ report }: { report: PersonaReport }) {
       <p className="pr-small">{t('persona.calendar.utc')}</p>
     </>
   )
-}
-
-const shortMoney = (v: number) => {
-  const a = Math.abs(v)
-  const s = a >= 1000 ? `${(a / 1000).toFixed(1)}k` : a >= 100 ? a.toFixed(0) : a.toFixed(1)
-  return `${v < 0 ? '−' : '+'}${s}`
 }
 
 function bucketLabel(t: T, key: BreakKey, b: PersonaBucket) {

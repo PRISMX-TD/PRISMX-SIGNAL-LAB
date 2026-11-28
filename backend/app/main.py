@@ -41,6 +41,7 @@ from app.services.support_desk import support_desk_loop
 from app.services.lucky.sweep import lucky_wheel_loop
 from app.services.econ.loop import econ_calendar_loop
 from app.services.persona.loop import persona_loop
+from app.services.persona.alerts import loss_alert_loop
 from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
@@ -262,6 +263,8 @@ async def lifespan(app: FastAPI):
         "econ_calendar": econ_calendar_loop,
         # 交易报告月底存档（10 分钟看一眼，每月 1 号存上个月）/ trading-report month-end archive
         "persona": persona_loop,
+        # 每日亏损提醒（60 秒，只看开着提醒的人）/ self-set daily loss alerts
+        "persona_alerts": loss_alert_loop,
     })
     loops.launch()
     app.state.background_loops = loops

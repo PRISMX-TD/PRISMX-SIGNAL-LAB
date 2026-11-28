@@ -32,7 +32,9 @@
     "agent_promoted": "Bạn đã trở thành đại sứ · mở Trung tâm Đại sứ",
     "chart_alert": "Cảnh báo biểu đồ đã kích hoạt",
     "persona_report": "Báo cáo giao dịch của bạn đã có",
-    "persona_changed": "Báo cáo giao dịch đã có và tính cách giao dịch của bạn đã thay đổi"
+    "persona_changed": "Báo cáo giao dịch đã có và tính cách giao dịch của bạn đã thay đổi",
+    "persona_annual": "Báo cáo giao dịch năm của bạn đã có",
+    "persona_loss_alert": "Lỗ hôm nay đã chạm mức bạn đặt"
   },
   "nav": {
     "dashboard": "Tổng quan",

@@ -2315,7 +2315,9 @@
     "focus": {
       "title": "交易报告里的这一单",
       "noPrice": "这份报告存档较早，没有成交价，只定位到开仓时间。",
-      "close": "关闭"
+      "close": "关闭",
+      "replay": "回放这一单",
+      "replayHint": "从开仓前开始，一根一根往后放"
     }
   },
   "winrate": {
@@ -5666,7 +5668,13 @@
       "aiComment": "月报 AI 点评",
       "hint": "AI 点评在每月存档时给每人写一次，只发送匿名的统计数字（不含邮箱、昵称、账号），由 DeepSeek 写，用的是财经日历同一个 DEEPSEEK_API_KEY。",
       "aiOn": "已开启",
-      "aiOff": "已关闭"
+      "aiOff": "已关闭",
+      "personaDemoPreview": "模拟盘预览人格",
+      "personaDemoPreviewHint": "打开后，还没解锁实盘人格的用户可以用模拟盘的单预览人格（只给人格，不给月报，页面和分享卡都标明「模拟盘预览」）。",
+      "personaGoals": "本月目标 + 目标人格",
+      "personaGoalsHint": "打开后，用户可以在报告里设最多 3 条本月目标和一个目标人格；每月 1 号把达标情况存进月报。达标没有奖励。",
+      "personaAgentBoard": "推荐官客户看板",
+      "personaAgentBoardHint": "打开后，有「看客户报告」权限的推荐官在「全部客户」页签顶部看到直属客户的人格分布、谁没交易了、谁的评分下滑。"
     }
   },
   "simulator": {
@@ -7699,6 +7707,193 @@
       "trend": "综合评分走势",
       "note": "箭头是和 {{month}} 比。",
       "noteLive": "箭头是和 {{month}} 比；本月还没结束，净盈亏和笔数等存档后再比。"
+    },
+    "week": {
+      "title": "周小结",
+      "this": "本周",
+      "last": "上周",
+      "range": "{{from}} – {{to}}（周一到周日，按 UTC）",
+      "empty": "这一周还没有平仓的单。",
+      "profit": "净盈亏",
+      "trades": "笔数",
+      "winRate": "胜率",
+      "score": "综合评分",
+      "issue": "最常见的问题",
+      "issueValue": "{{name}} × {{n}}",
+      "issueNone": "没有带问题标签的单",
+      "topSymbol": "做得最多的品种",
+      "bestDay": "最好的一天",
+      "worstDay": "最差的一天",
+      "vsLast": "箭头是和上周比。"
+    },
+    "streak": {
+      "title": "纪律连续记录",
+      "lead": "只看习惯，不看盈亏。按最近 90 天算。",
+      "stops": "连续带止损",
+      "noHeldLoser": "连续没有扛单",
+      "noRevenge": "连续没有报复加仓",
+      "noMovedStop": "连续没有反向挪止损",
+      "unit": {
+        "trades": "{{n}} 笔",
+        "days": "{{n}} 天"
+      },
+      "best": "近 90 天最长 {{v}}",
+      "broken": "{{date}} 断了，之前连续 {{v}}"
+    },
+    "goal": {
+      "title": "本月目标",
+      "titleArchived": "这个月的目标",
+      "set": "设定目标",
+      "edit": "修改",
+      "empty": "还没有设目标。挑一两件这个月想做到的事，报告会每天告诉你进度。",
+      "save": "保存",
+      "cancel": "取消",
+      "add": "加一条（最多 {{n}} 条）",
+      "remove": "删掉这一条",
+      "pick": "选一个目标",
+      "target": "目标人格",
+      "targetNone": "不设",
+      "targetNote": "按「本月走向」算：如果今天结算，四条轴各自是不是已经到了目标那一边。",
+      "axisMet": "已是「{{pole}}」",
+      "axisNeed": "{{from}} → 要变成「{{pole}}」",
+      "now": "现在 {{v}}",
+      "count": "{{n}} 笔",
+      "unitCount": "笔",
+      "invalid": "「{{name}}」的数值不在可设范围内。",
+      "editNote": "目标设了会一直沿用到你改掉；每月 1 号结算时，达标情况会存进那个月的报告。",
+      "setAt": "设定于 {{date}}",
+      "metric": {
+        "winRate": "胜率",
+        "payoff": "盈亏比",
+        "score": "综合评分",
+        "maxDrawdown": "最大回撤",
+        "trades": "交易笔数",
+        "unprotected": "没带止损的单",
+        "heldLoser": "扛单",
+        "revenge": "报复加仓",
+        "movedStop": "反向挪止损"
+      },
+      "rule": {
+        "ge": "目标：不低于 {{v}}",
+        "le": "目标：不超过 {{v}}"
+      },
+      "dir": {
+        "ge": "不低于",
+        "le": "不超过"
+      },
+      "state": {
+        "met": "达标",
+        "unmet": "未达标",
+        "pending": "进行中",
+        "onTrack": "目前达标",
+        "over": "已超出"
+      }
+    },
+    "peers": {
+      "title": "和同人格的人比",
+      "leadCode": "和 {{n}} 位同为「{{name}}」的交易者相比。",
+      "leadFamily": "同人格的人还不够多，这里是和 {{n}} 位「{{family}}」家族的交易者相比。",
+      "you": "你",
+      "them": "他们的中位数",
+      "note": "双方都按各自最近一次结算的 90 天数据。只是参照，不代表哪种更好。",
+      "row": {
+        "medianHoldMin": "持仓时间中位数",
+        "perDay": "每个交易日出手次数",
+        "payoff": "盈亏比",
+        "holdRatio": "亏损单 / 盈利单持有时间",
+        "signalShare": "跟信号的单占比",
+        "manageShare": "开仓后改过止损止盈的占比"
+      }
+    },
+    "alert": {
+      "title": "每日亏损提醒",
+      "lead": "自己设一个「今天最多亏多少」。到了这个数会收到一条通知，只是提醒，不会拦单，也不会替你平仓。",
+      "limit": "今天最多亏",
+      "on": "已开启",
+      "off": "未开启",
+      "enable": "开启提醒",
+      "update": "更新金额",
+      "disable": "关闭",
+      "savedOn": "已保存。今天的亏损到这个数时会提醒你。",
+      "savedOff": "已关闭提醒。",
+      "fired": "今天已经提醒过一次，明天重新计算。",
+      "note": "按 UTC 自然日计算：今天已平仓的实盘单盈亏，加上当前实盘持仓的浮动盈亏。一天只提醒一次。",
+      "invalid": "请填 1 到 1,000,000 之间的金额。"
+    },
+    "preview": {
+      "pill": "模拟盘预览",
+      "title": "你在模拟盘上是「{{name}}」",
+      "lead": "这是用你最近 90 天的模拟盘单按同一套规则算的，只是预览。开通实盘并完成 20 次出手后，会得到正式人格和每月的交易报告。",
+      "progressTitle": "先在模拟盘上看看你的人格",
+      "progressLead": "模拟盘的单也能预览交易人格，条件和实盘一样。",
+      "share": "分享预览人格"
+    },
+    "annual": {
+      "chip": "{{y}} 年度",
+      "title": "{{y}} 年度交易报告",
+      "none": "这一年还没有年度报告。",
+      "empty": "这一年没有平仓的单。",
+      "preview": "预览：今年到目前为止的数据。正式的年度报告在 1 月 1 日出炉。",
+      "covers": "覆盖 {{from}} 到 {{to}}，共 {{n}} 个月",
+      "net": "{{y}} 年净盈亏",
+      "monthly": "逐月走势",
+      "monthlyNote": "柱子是当月净盈亏，下面的数字是当月综合评分。",
+      "journey": "这一年的人格",
+      "journeySame": "这一年你一直是「{{name}}」。",
+      "journeyChanged": "这一年你换过 {{n}} 次人格，待得最久的是「{{name}}」。",
+      "records": "这一年的纪录",
+      "record": {
+        "bestTrade": "最赚的一笔",
+        "worstTrade": "最亏的一笔",
+        "bestDay": "最好的一天",
+        "worstDay": "最差的一天",
+        "bestMonth": "最好的一个月",
+        "busiestDay": "最忙的一天",
+        "winRun": "最长连胜",
+        "lossRun": "最长连亏",
+        "longestHold": "拿得最久的一笔",
+        "topSymbol": "做得最多的品种",
+        "bestSymbol": "最赚钱的品种",
+        "topSession": "最常交易的时段",
+        "topWeekday": "最常交易的星期",
+        "holdHours": "全年持仓总时长"
+      },
+      "halves": "前半段和后半段",
+      "halvesNote": "标签那几行是每 100 笔里出现几笔；后半段比前半段好的标绿。",
+      "improved": "进步最大的一项：「{{name}}」从每 100 笔 {{a}} 笔降到 {{b}} 笔。",
+      "heat": "全年盈亏日历",
+      "tags": "全年的问题单",
+      "badges": "这一年拿到的徽章",
+      "badgeTimes": "{{n}} 个月",
+      "streaks": "这一年最长的纪律记录"
+    },
+    "card": {
+      "mine": "我的交易报告",
+      "monthKind": "月度交易报告",
+      "annualKind": "年度交易报告",
+      "showMoney": "显示金额",
+      "hideMoney": "隐藏金额",
+      "shareMonth": "分享月报",
+      "shareAnnual": "分享年度报告"
+    },
+    "board": {
+      "title": "客户看板",
+      "lead": "只统计你的直属客户。评分取自每月 1 号存档的月报，掉分是最近两个月相比。",
+      "total": "直属客户",
+      "withPersona": "已有人格",
+      "dropped": "评分掉了 {{p}} 分以上",
+      "inactive": "{{d}} 天没交易",
+      "filter": {
+        "attention": "需要关注",
+        "all": "全部"
+      },
+      "empty": "目前没有需要特别关注的客户。",
+      "never": "还没下过实盘单",
+      "today": "今天有交易",
+      "daysAgo": "{{n}} 天前交易过",
+      "noPersona": "还没有人格",
+      "tagDropped": "评分下滑",
+      "tagInactive": "没交易了"
     }
   }
 }

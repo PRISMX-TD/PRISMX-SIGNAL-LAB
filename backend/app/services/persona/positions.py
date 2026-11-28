@@ -112,11 +112,13 @@ def _utc(dt: datetime | None) -> datetime | None:
     return aware(dt) if dt is not None else None
 
 
-def load_positions(db, user_id: str, since: datetime, until: datetime) -> list[Position]:
+def load_positions(db, user_id: str, since: datetime, until: datetime, modes=(REAL,)) -> list[Position]:
     """[since, until) 里平完的实盘仓位，按开仓时间排序。since / until 带时区（UTC）。
-    Closed real positions whose final close falls in [since, until), sorted by open time."""
+    modes：算哪种账户的单，默认只算实盘；模拟盘预览人格传 (DEMO,)。
+    Closed real positions whose final close falls in [since, until), sorted by open time.
+    modes picks the account kind: real by default, (DEMO,) for the demo persona preview."""
     orders = _filled_orders(db, user_id, cutoff=(since - timedelta(days=OPEN_LOOKBACK_DAYS)).replace(tzinfo=None),
-                            modes=[REAL], before=until.replace(tzinfo=None))
+                            modes=list(modes), before=until.replace(tzinfo=None))
     if not orders:
         return []
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
@@ -202,6 +204,36 @@ def _auto_managed(db, user_id: str, tickets: list[int]) -> set:
     return out
 
 
+def open_real_profit(db, user_id: str, rows: list[dict]) -> float:
+    """持仓快照里本平台开的实盘仓位此刻的浮动盈亏合计（盈亏都算）。每日亏损提醒用。
+    Net floating P&L of the real positions this platform opened (winners and losers); for the daily loss alert."""
+    vals = {}
+    for r in rows or []:
+        try:
+            profit = float(r.get("profit") or 0)
+            ticket = int(r.get("ticket") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ticket and profit == profit and abs(profit) != float("inf"):
+            vals[(str(r.get("login") or ""), ticket)] = profit
+    if not vals:
+        return 0.0
+    tickets = [t for _, t in vals]
+    orders = (db.query(Order)
+                .filter(Order.user_id == user_id, Order.action.in_(["ORDER", "PENDING"]), Order.trade_mode == REAL,
+                        (Order.mt5_position.in_(tickets)) | (Order.mt5_ticket.in_(tickets)))
+                .all())
+    seen = set()
+    total = 0.0
+    for o in orders:
+        pid = position_id_of(o)
+        key = (o.mt5_login or "", int(pid)) if pid else None
+        if key in vals and key not in seen:
+            seen.add(key)
+            total += vals[key]
+    return total
+
+
 def open_losing_positions(db, user_id: str, rows: list[dict], now: datetime) -> list[Position]:
     """月底存档用：把持仓快照里浮亏的实盘仓位变成「按亏损计」的记录（方案第 4 节）。
     rows 是 connection_manager 的持仓快照行（ticket / login / profit / symbol / side / volume）。
@@ -242,6 +274,9 @@ def open_losing_positions(db, user_id: str, rows: list[dict], now: datetime) -> 
             open_price=o.filled_price, sl_at_open=o.sl, tp_at_open=o.tp, unrealized=True,
         ))
     return out
+
+
+DEMO = 0     # 与 services/account_type.DEMO 相同 / same as services/account_type.DEMO
 
 
 def has_real_orders(db, user_id: str) -> bool:

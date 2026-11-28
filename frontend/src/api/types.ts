@@ -2293,6 +2293,11 @@ export interface GamificationSettings {
   // Trading report + persona: user switch and month-end AI comment switch, both off by default.
   personaVisible?: boolean
   personaAiComment?: boolean
+  // 交易报告的三个功能开关（2026-11-28），默认都关：模拟盘预览人格、本月目标 + 目标人格、推荐官客户看板。
+  // Three report feature switches, all off by default: demo persona preview, monthly goals, ambassador board.
+  personaDemoPreview?: boolean
+  personaGoals?: boolean
+  personaAgentBoard?: boolean
   // 公开比赛页总开关（设计 §1.7）：关掉时所有 /c 页 404，出问题先关这里。默认 false。
   // Kill switch for public competition pages (design §1.7); off = every /c page 404s.
   competitionsPublicEnabled: boolean
@@ -2314,6 +2319,9 @@ export interface GamificationSettingsPatch {
   winrateRequireProfit?: boolean
   personaVisible?: boolean
   personaAiComment?: boolean
+  personaDemoPreview?: boolean
+  personaGoals?: boolean
+  personaAgentBoard?: boolean
   competitionsPublicEnabled?: boolean
   featuredCompetitionId?: string | null
 }

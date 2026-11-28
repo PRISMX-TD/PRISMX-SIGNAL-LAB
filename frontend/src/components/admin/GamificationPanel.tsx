@@ -188,7 +188,7 @@ export default function GamificationPanel() {
   const [minTradesWinrateDraft, setMinTradesWinrateDraft] = useState('')
   const [savingTradeGates, setSavingTradeGates] = useState(false)
   const [savingWrProfit, setSavingWrProfit] = useState(false)
-  const [savingPersona, setSavingPersona] = useState<null | 'visible' | 'ai'>(null)
+  const [savingPersona, setSavingPersona] = useState<null | 'visible' | 'ai' | 'personaDemoPreview' | 'personaGoals' | 'personaAgentBoard'>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -343,8 +343,9 @@ export default function GamificationPanel() {
   // no draft state, matching how the three visibility switches behave.
   // 交易报告 + 交易人格（2026-11-22）：两个开关都是点了即存，开关两个方向都不用确认。
   // Trading report + persona: both switches save on toggle, no confirmation either way.
-  const togglePersona = async (field: 'personaVisible' | 'personaAiComment', next: boolean) => {
-    setSavingPersona(field === 'personaVisible' ? 'visible' : 'ai')
+  type PersonaField = 'personaVisible' | 'personaAiComment' | 'personaDemoPreview' | 'personaGoals' | 'personaAgentBoard'
+  const togglePersona = async (field: PersonaField, next: boolean) => {
+    setSavingPersona(field === 'personaVisible' ? 'visible' : field === 'personaAiComment' ? 'ai' : field)
     setSettingsError(null)
     try {
       setSettings(await adminApi.updateGamificationSettings({ [field]: next }))
@@ -690,6 +691,21 @@ export default function GamificationPanel() {
               onChange={(v) => void togglePersona('personaAiComment', v)}
             />
             <p className="-mt-1 text-xs text-neutral-500">{t('admin.persona.hint')}</p>
+            {/* 2026-11-28 的三个功能开关，都默认关；管理员自己不受限制，可以先看效果再打开。
+                Three feature switches (off by default); admins are never gated, so they can preview first. */}
+            {(['personaDemoPreview', 'personaGoals', 'personaAgentBoard'] as const).map((f) => (
+              <div key={f} className="space-y-2">
+                <SettingsToggleRow
+                  label={t(`admin.persona.${f}`)}
+                  checked={!!settings?.[f]}
+                  saving={savingPersona === f}
+                  onLabel={t('gamification.admin.visibleOn')}
+                  offLabel={t('gamification.admin.visibleOff')}
+                  onChange={(v) => void togglePersona(f, v)}
+                />
+                <p className="text-xs text-neutral-500">{t(`admin.persona.${f}Hint`)}</p>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -393,6 +393,15 @@ function AgentOnly({ children }: { children: ReactNode }) {
 // Signed in → dashboard. A logged-out visitor's home follows the admin guest-preview switch: on = the locked
 // dashboard, off = the landing page (also always at /intro). bootPreload has usually decided
 // already; on an in-app navigation back home before that, render nothing until it has.
+// /persona 是旧地址，报告在「交易」页的页签里。带 ?annual=年份（年度报告出炉的通知链接）时把年份一起带过去。
+// /persona is the legacy address of the Orders page's report tab; ?annual=YYYY (the annual-report
+// notification link) travels along in the router state.
+function PersonaRedirect() {
+  const year = Number(new URLSearchParams(useLocation().search).get('annual'))
+  const annual = Number.isInteger(year) && year >= 2020 && year <= 2100 ? year : undefined
+  return <Navigate to="/orders" replace state={{ tab: 'persona', annual }} />
+}
+
 function Home() {
   const { isAuthed } = useAuth()
   const [mode, setMode] = useState<HomeMode | null>(decidedHomeMode)
@@ -654,7 +663,7 @@ export default function App() {
                   /persona/client 是推荐官看直属客户的报告（邮箱放在路由 state 里，不进网址），页面自己处理 403。
                   Trading report + persona is a tab of the Orders page; /persona just redirects there. /persona/client
                   is an ambassador's view of a direct customer (e-mail in router state, not the URL). */}
-              <Route path="/persona" element={<Navigate to="/orders" replace state={{ tab: 'persona' }} />} />
+              <Route path="/persona" element={<PersonaRedirect />} />
               <Route path="/persona/client" element={<PersonaPage mode="client" />} />
               {/* 公开主页（2026-09-07）：从榜面名字点进来；不套外壳，自带返回。
                   Public profile: reached from board names; no shell, carries its own back link. */}

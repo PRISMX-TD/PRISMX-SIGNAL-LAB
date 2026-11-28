@@ -2685,3 +2685,39 @@ class PersonaReport(Base):
     ai_status = Column(String, nullable=True)          # ok / failed / off
     ai_model = Column(String, nullable=True)
     archived_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PersonaAnnualReport(Base):
+    """一个用户一年的年度交易报告存档（2026-11-28，rev 58）。12 月的月报存完之后（1 月 1 号）生成一次，
+    之后不再改。report_json 是整份年度报告（全年成绩、逐月走势、人格变化、各项纪录）。
+    One user's archived annual trading report (rev 58), written once after December's monthly archive
+    completes on January 1st. report_json holds the whole report."""
+    __tablename__ = "persona_annual_reports"
+    __table_args__ = (UniqueConstraint("user_id", "year", name="uq_persona_annual_user_year"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    year = Column(Integer, nullable=False)
+    report_json = Column(Text, nullable=False, default="{}")
+    archived_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PersonaPref(Base):
+    """交易报告里用户自己设的东西（rev 58），每个用户一行：
+    - 本月目标：goals_json 是 [{key, target}, …]（最多 3 条，键见 persona/engine.GOAL_METRICS），
+      target_code 是目标人格的四字母代号。设了就一直沿用到用户改掉；每月存档时把达标情况写进月报。
+    - 每日亏损提醒：loss_limit 是用户设的金额（账户货币，正数），loss_enabled 是开关，
+      loss_fired_day 是上次提醒的那一天（UTC，YYYY-MM-DD），一天只提醒一次。
+    What the user sets in the trading report (rev 58), one row per user: standing monthly goals plus a
+    target persona, and the self-set daily loss alert (limit, switch, the UTC day it last fired)."""
+    __tablename__ = "persona_prefs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    goals_json = Column(Text, nullable=True)
+    target_code = Column(String, nullable=True)
+    goals_set_at = Column(DateTime, nullable=True)
+    loss_limit = Column(Float, nullable=True)
+    loss_enabled = Column(Boolean, nullable=False, default=False)
+    loss_fired_day = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)

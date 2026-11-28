@@ -32,7 +32,9 @@
     "agent_promoted": "アンバサダーになりました。アンバサダーセンターを開いてください",
     "chart_alert": "チャートアラートが発動しました",
     "persona_report": "取引レポートができました",
-    "persona_changed": "取引レポートができました。取引人格が変わりました"
+    "persona_changed": "取引レポートができました。取引人格が変わりました",
+    "persona_annual": "年間取引レポートができました",
+    "persona_loss_alert": "本日の損失が上限に達しました"
   },
   "nav": {
     "dashboard": "ホーム",

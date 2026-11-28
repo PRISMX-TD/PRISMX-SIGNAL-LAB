@@ -463,7 +463,12 @@ def _hash_legacy_api_tokens() -> None:
 #          data 是前端自定的布局 JSON）。同 rev 56：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
 #          rev 57 — chart layouts (chart phase 6): new table chart_layouts via create_all (at most 30 per
 #          user, data is frontend-owned layout JSON). No ADD COLUMN, no backfill.
-CURRENT_SCHEMA_REV = 57
+# rev 58 — 交易报告新功能（2026-11-28）：新表 persona_annual_reports（年度报告存档）、persona_prefs（用户自设的
+#          本月目标 / 目标人格 / 每日亏损提醒），都由 create_all 建表建索引。同 rev 57：无 ADD COLUMN、无回填。
+#          新推送事件 persona_annual、loss_alert 进 ALWAYS_ON_EVENTS，不用补白名单。
+#          rev 58 — trading-report additions: new tables persona_annual_reports and persona_prefs via
+#          create_all. No ADD COLUMN, no backfill; the new push events are always on.
+CURRENT_SCHEMA_REV = 58
 
 _SCHEMA_REV_KEY = "schema_rev"
 

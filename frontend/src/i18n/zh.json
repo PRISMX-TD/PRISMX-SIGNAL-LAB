@@ -32,7 +32,9 @@
     "agent_promoted": "你已成为推荐官，点击查看推荐官中心",
     "chart_alert": "图表警报已触发",
     "persona_report": "交易报告出炉了",
-    "persona_changed": "交易报告出炉，你的交易人格变了"
+    "persona_changed": "交易报告出炉，你的交易人格变了",
+    "persona_annual": "年度交易报告出炉了",
+    "persona_loss_alert": "今日亏损已到你设的上限"
   },
   "nav": {
     "dashboard": "仪表盘",

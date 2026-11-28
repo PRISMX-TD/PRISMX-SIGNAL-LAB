@@ -7,13 +7,13 @@
 // label saying which trade it is. Independent of the executions switch and of the account — the
 // prices come from the report. Reports archived before fill prices were kept can't be drawn: the
 // label stays and says so (the jump to the entry time still happened).
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi } from 'lightweight-charts'
 import type { MainSeriesApi } from '../useChartEngine'
 import { isChartAlive } from '../chartLifecycle'
 import { ExecPrimitive } from './ExecutionMarkers'
-import { focusLeg, type FocusTrade } from './focusTrade'
+import { focusLeg, focusPhase, type FocusPhase, type FocusTrade } from './focusTrade'
 import { fmtSigned, placeLegs } from './tradeMath'
 
 interface Props {
@@ -27,12 +27,19 @@ interface Props {
   drawable: boolean
   fmtTime: (ts: number) => string
   onClose: () => void
+  /** 「回放这一单」：从开仓前几根开始一根一根放。回放进行中不给（按钮收起）。
+   *  "Replay this trade": bar by bar from just before the entry; absent while a replay runs. */
+  onReplay?: () => void
+  /** 正在回放这一单：开仓那根还没放到就不画，平仓那根还没放到只画开仓，盈亏也先不说。
+   *  Replaying this trade: nothing before the entry bar, entry only before the exit bar, no P&L yet. */
+  replaying?: boolean
 }
 
-export default function FocusTradeLayer({ chart, series, trade, barTimes, dataKey, drawable, fmtTime, onClose }: Props) {
+export default function FocusTradeLayer({ chart, series, trade, barTimes, dataKey, drawable, fmtTime, onClose, onReplay, replaying = false }: Props) {
   const { t } = useTranslation()
   const primRef = useRef<ExecPrimitive | null>(null)
   const leg = useMemo(() => focusLeg(trade), [trade])
+  const [phase, setPhase] = useState<FocusPhase>('closed')
 
   useEffect(() => {
     if (!drawable || !leg) return
@@ -60,7 +67,9 @@ export default function FocusTradeLayer({ chart, series, trade, barTimes, dataKe
       const next = `${times.length}:${times[0] ?? 0}`
       if (next === stamp) return
       stamp = next
-      prim.legs = placeLegs([leg], times)
+      const ph = replaying ? focusPhase(times, leg.t1, leg.t2) : 'closed'
+      setPhase(ph)
+      prim.legs = ph === 'before' ? [] : placeLegs([ph === 'open' ? { ...leg, t2: null, p2: null, profit: null } : leg], times)
       prim.requestUpdate()
     }
     place()
@@ -70,10 +79,10 @@ export default function FocusTradeLayer({ chart, series, trade, barTimes, dataKe
       if (!isChartAlive(chart)) return
       try { ts.unsubscribeVisibleLogicalRangeChange(place) } catch { /* chart gone */ }
     }
-  }, [chart, leg, barTimes, dataKey, drawable])
+  }, [chart, leg, barTimes, dataKey, drawable, replaying])
 
   const side = t(trade.side === 'BUY' ? 'persona.side.buy' : 'persona.side.sell')
-  const pnl = trade.profit == null ? null : fmtSigned(trade.profit)
+  const pnl = trade.profit == null || (replaying && phase !== 'closed') ? null : fmtSigned(trade.profit)
   return (
     <div className="chart-focus" role="status">
       <div className="chart-focus-main">
@@ -85,6 +94,12 @@ export default function FocusTradeLayer({ chart, series, trade, barTimes, dataKe
         </span>
         {!leg && <span className="chart-focus-note">{t('charts.focus.noPrice')}</span>}
       </div>
+      {onReplay && leg && (
+        <button type="button" className="chart-focus-replay" onClick={onReplay} title={String(t('charts.focus.replayHint'))}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5v14l12-7z" /></svg>
+          {t('charts.focus.replay')}
+        </button>
+      )}
       <button type="button" onClick={onClose} aria-label={String(t('charts.focus.close'))} title={String(t('charts.focus.close'))}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>

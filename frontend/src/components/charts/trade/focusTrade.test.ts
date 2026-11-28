@@ -3,7 +3,7 @@
 // Why: a wrong hour offset, an interval with no stored bars or junk in the router state would not
 // throw — the chart would just land on nothing or mark the wrong spot.
 import { describe, expect, it } from 'vitest'
-import { focusFromRef, focusInterval, focusLeg, readFocusState } from './focusTrade'
+import { focusFromRef, focusInterval, focusLeg, focusPhase, readFocusState } from './focusTrade'
 
 const REF = {
   symbol: 'xauusd.m', side: 'SELL', openAt: '2026-11-03T08:00:00+00:00', closeAt: '2026-11-03T08:20:00+00:00',
@@ -51,6 +51,26 @@ describe('focusInterval', () => {
   })
   it('measures an open trade up to now', () => {
     expect(focusInterval({ t1: T1, t2: null }, T1 + 2 * 86400)).toBe('15')
+  })
+})
+
+// 回放这一单：开仓、平仓要等放到那一根才出现，早一根就是剧透，晚一根就是标记消失。
+// Replaying the trade: entry and exit must appear exactly when their bars are reached.
+describe('focusPhase', () => {
+  const bars = (last: number) => Array.from({ length: 5 }, (_, i) => last - (4 - i) * 60)
+  it('is before the entry until the entry bar is on screen', () => {
+    expect(focusPhase(bars(T1 - 120), T1 + 10, T1 + 600)).toBe('before')
+    expect(focusPhase(bars(T1 - 60), T1 + 10, T1 + 600)).toBe('before')
+    expect(focusPhase(bars(T1), T1 + 10, T1 + 600)).toBe('open')
+  })
+  it('stays open until the exit bar, then closes', () => {
+    expect(focusPhase(bars(T1 + 480), T1 + 10, T1 + 600)).toBe('open')
+    expect(focusPhase(bars(T1 + 540), T1 + 10, T1 + 600)).toBe('open')
+    expect(focusPhase(bars(T1 + 600), T1 + 10, T1 + 600)).toBe('closed')
+  })
+  it('treats a trade without an exit as fully shown once entered, and no bars as before', () => {
+    expect(focusPhase(bars(T1), T1 + 10, null)).toBe('closed')
+    expect(focusPhase([], T1, T1 + 60)).toBe('before')
   })
 })
 

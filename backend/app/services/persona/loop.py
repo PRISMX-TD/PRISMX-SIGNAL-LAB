@@ -24,7 +24,7 @@ from datetime import timedelta
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
-from app.models import PersonaReport, PersonaState, PlatformSetting, UserPref
+from app.models import PersonaAnnualReport, PersonaReport, PersonaState, PlatformSetting, UserPref
 from app.services.persona import service
 from app.services.persona.positions import utcnow
 
@@ -37,6 +37,25 @@ MAX_USERS_PER_PASS = 200
 WATERMARK_KEY = "persona_archive"
 REPORT_LINK = "/persona"
 PUSH_TAG = "prismx-persona"
+# 年度报告（rev 58）：12 月的月报全部存完之后生成上一年的，存完记水位 persona_annual。出炉通知只在
+# 1 月 1 号当天（24 小时内）发，晚了补存的不发。
+# Annual report (rev 58): generated once December's monthly archive is complete; its own watermark.
+# The "it's out" notification only goes out within 24 hours of the new year.
+ANNUAL_WATERMARK_KEY = "persona_annual"
+ANNUAL_NOTIFY_GRACE = timedelta(hours=24)
+# 年度报告出炉的推送文案，{y} 是年份。/ Push copy for the annual report; {y} is the year.
+ANNUAL_PUSH_COPY = {
+    "zh": ("你的年度交易报告出炉了", "{y} 年度交易报告出炉了，来看看这一年你是怎么交易的"),
+    "en": ("Your annual trading report is out", "Your {y} trading report is ready. See how your year of trading went."),
+    "ja": ("年間取引レポートができました", "{y}年の年間取引レポートができました。この一年の取引を振り返りましょう"),
+    "th": ("รายงานการเทรดประจำปีของคุณออกแล้ว", "รายงานการเทรดประจำปี {y} ของคุณพร้อมแล้ว มาดูกันว่าปีนี้คุณเทรดเป็นอย่างไร"),
+    "vi": ("Báo cáo giao dịch năm của bạn đã có", "Báo cáo giao dịch năm {y} của bạn đã sẵn sàng. Xem một năm giao dịch của bạn thế nào."),
+}
+
+
+def annual_push_text(lang: str, year: int) -> tuple[str, str]:
+    title, body = ANNUAL_PUSH_COPY.get(lang, ANNUAL_PUSH_COPY["zh"])
+    return title, body.format(y=year)
 
 # 推送文案按用户的界面语言发。界面语言存在云端偏好里（user_prefs.data 的 lang.lang，前端切语言时
 # 同步上来）；没同步过、或不是这五种之一的按中文发（和其它推送一致）。{m} 是月份数字，英文用月份名。
@@ -96,15 +115,19 @@ def user_langs(db, user_ids) -> dict:
     return out
 
 
-def _watermark(db) -> str | None:
+def _mark(db, key: str, field: str):
     import json
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == WATERMARK_KEY).first()
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
     if row is None:
         return None
     try:
-        return (json.loads(row.value) or {}).get("period")
+        return (json.loads(row.value) or {}).get(field)
     except (ValueError, AttributeError):
         return None
+
+
+def _watermark(db) -> str | None:
+    return _mark(db, WATERMARK_KEY, "period")
 
 
 def _notify(db, period: str, same: list[str], changed: list[tuple[str, str, str]]) -> None:
@@ -160,6 +183,7 @@ def run_archive_pass(now=None) -> dict:
             return {"period": period, "done": True, "archived": 0}
         gs = get_gamification_settings(db)
         ai_enabled = bool(gs.get("persona_ai_comment"))
+        goals_on = bool(gs.get("persona_goals"))
         with_open = now - start_of_month < OPEN_ROWS_GRACE
         notify = bool(gs.get("persona_visible")) and with_open
         same: list[str] = []
@@ -177,7 +201,8 @@ def run_archive_pass(now=None) -> dict:
                     rows = None
             try:
                 old_code = db.query(PersonaState.code).filter(PersonaState.user_id == uid).scalar() if notify else None
-                row = service.archive_user(db, uid, period, now, open_rows=rows, ai_enabled=ai_enabled)
+                row = service.archive_user(db, uid, period, now, open_rows=rows, ai_enabled=ai_enabled,
+                                           goals=goals_on)
             except Exception:  # noqa: BLE001 —— 一个人出错不拖累其他人 / one failure doesn't stop the rest
                 db.rollback()
                 logger.exception("persona archive failed for a user")
@@ -202,6 +227,75 @@ def run_archive_pass(now=None) -> dict:
         db.close()
 
 
+def run_annual_pass(now=None) -> dict:
+    """年度报告存一轮：上一年 12 月的月报存完了才开始。返回 {year, archived, done} 或 {waiting}。
+    One annual pass for last year, once December's monthly archive is complete."""
+    from datetime import datetime, timezone
+    from app.services.persona import annual
+    from app.services.settings_store import get_gamification_settings, set_setting
+    now = now or utcnow()
+    year = now.year - 1
+    db = SessionLocal()
+    try:
+        if _mark(db, ANNUAL_WATERMARK_KEY, "year") == year:
+            return {"year": year, "done": True, "archived": 0}
+        if (_watermark(db) or "") < f"{year}-12":
+            return {"year": year, "waiting": True}
+        notify = (bool(get_gamification_settings(db).get("persona_visible"))
+                  and now - datetime(now.year, 1, 1, tzinfo=timezone.utc) < ANNUAL_NOTIFY_GRACE)
+        done_ids = {u for (u,) in db.query(PersonaAnnualReport.user_id)
+                    .filter(PersonaAnnualReport.year == year).all()}
+        todo = [u for u in annual.candidate_users(db, year) if u not in done_ids]
+        archived = 0
+        told: list[str] = []
+        for uid in todo[:MAX_USERS_PER_PASS]:
+            try:
+                row = annual.archive_annual(db, uid, year, now)
+            except Exception:  # noqa: BLE001 —— 一个人出错不拖累其他人 / one failure doesn't stop the rest
+                db.rollback()
+                logger.exception("annual report failed for a user")
+                continue
+            if row is not None:
+                archived += 1
+                if notify:
+                    told.append(uid)
+        _notify_annual(db, year, told)
+        finished = len(todo) <= MAX_USERS_PER_PASS
+        if finished:
+            set_setting(db, ANNUAL_WATERMARK_KEY, {"year": year, "at": now.isoformat()})
+            db.commit()
+        return {"year": year, "archived": archived, "done": finished}
+    finally:
+        db.close()
+
+
+def _notify_annual(db, year: int, user_ids: list[str]) -> None:
+    if not user_ids:
+        return
+    from app.services.notification_feed import KIND_PERSONA_ANNUAL, create_notification, notify_ws_many
+    link = f"{REPORT_LINK}?annual={year}"
+    try:
+        for uid in user_ids:
+            create_notification(db, uid, KIND_PERSONA_ANNUAL, text=str(year), link=link, ref_id=str(year))
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.exception("annual report notifications failed")
+        return
+    notify_ws_many(user_ids)
+    try:
+        from app.services.push_dispatch import EVENT_PERSONA_REPORT, dispatch_users_push
+        langs = user_langs(db, user_ids)
+        groups: dict = {}
+        for uid in user_ids:
+            groups.setdefault(langs.get(uid, DEFAULT_PUSH_LANG), []).append(uid)
+        for lang, ids in groups.items():
+            title, body = annual_push_text(lang, year)
+            dispatch_users_push(ids, EVENT_PERSONA_REPORT, title, body, url=link, tag=PUSH_TAG)
+    except Exception:  # noqa: BLE001
+        logger.exception("annual report push failed")
+
+
 async def persona_loop(startup_delay: float = 50.0):
     await asyncio.sleep(startup_delay)
     from app.services import loop_health
@@ -211,6 +305,9 @@ async def persona_loop(startup_delay: float = 50.0):
             result = await run_in_threadpool(run_archive_pass)
             if result.get("archived"):
                 logger.info("persona archive %s", result)
+            result = await run_in_threadpool(run_annual_pass)
+            if result.get("archived"):
+                logger.info("persona annual %s", result)
         except Exception:
             logger.exception("persona archive pass failed")
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)

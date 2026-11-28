@@ -23,6 +23,7 @@
 // avatar too; phones get fact-grid cards.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import AgentBoardPanel from './AgentBoardPanel'
 import { useNavigate } from 'react-router-dom'
 import { agentApi } from '../../api/client'
 import { fmtDate, localizeApiError } from '../../api/utils'
@@ -222,6 +223,8 @@ export default function AgentCustomersPanel({
 
   return (
     <section>
+      {/* 客户看板（开关 + 权限都满足才有内容，否则不占位）/ the customer board; renders nothing unless switched on and allowed */}
+      {canViewReports && <AgentBoardPanel />}
       {/* 工具栏：搜索、按推荐官筛、人数，一条排完；手机上上下叠。
           Toolbar: search, ambassador filter and the count in one strip; stacked on phones. */}
       <div className="agt-toolbar">

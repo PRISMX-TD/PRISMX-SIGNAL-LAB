@@ -451,3 +451,188 @@
   .pr-ring-arc { stroke-dasharray: var(--len) var(--c); transition: none; }
   .pr-prog-track span, .pr-seg button, .pr-chip, .pr-btn, .pr-intro-toggle svg, .pr-gal-i { transition: none; }
 }
+
+/* ================= 2026-11-28（rev 58）：周小结、连续记录、目标、同人格对比、亏损提醒、模拟盘预览、年度报告 ================= */
+.pr-month-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.pr-month-top .pr-link { padding: 4px 0; }
+.pr-chip.is-year { border-color: color-mix(in srgb, var(--fam) 55%, var(--line-hi)); color: var(--text-strong); }
+.pr-grid2.is-even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pr-mini.is-on { background: rgb(var(--up-rgb) / 0.14); color: var(--up); }
+.pr-mini.is-demo { background: rgb(255 255 255 / 0.1); color: var(--text-strong); box-shadow: inset 0 0 0 1px var(--line-hi); }
+
+/* 周小结 / weekly digest */
+.pr-wk { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.pr-wk > div { display: grid; gap: 4px; padding: 12px 14px; background: var(--surface-2); min-width: 0; }
+.pr-wk dt { font-size: 12px; color: var(--text-3); }
+.pr-wk dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; font-size: 17px; font-weight: 700; color: var(--text-strong); }
+.pr-wk dd .pr-delta { font-size: 11px; font-weight: 600; }
+.pr-wk-facts { display: grid; }
+.pr-wk-facts li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.pr-wk-facts li:first-child { border-top: 0; }
+.pr-wk-facts span { color: var(--text-3); }
+.pr-wk-facts b { font-weight: 600; color: var(--text-strong); text-align: right; }
+.pr-wk-facts i { font-style: normal; margin-left: 6px; font-weight: 600; }
+.pr-wk-empty { padding: 26px 0; text-align: center; font-size: 13px; color: var(--text-3); }
+
+/* 纪律连续记录 / discipline streaks */
+.pr-streaks { display: grid; gap: 14px; }
+.pr-streaks li { display: grid; gap: 6px; }
+.pr-streak-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-2); }
+.pr-streak-top b { font-size: 16px; font-weight: 700; color: var(--text-strong); }
+.pr-streaks .pr-prog-track span { background: var(--fam); }
+.pr-streaks li.is-best .pr-streak-top b { color: var(--fam); }
+
+/* 本月目标 / monthly goals */
+.pr-goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pr-goal { display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+.pr-goal-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pr-goal-top b { font-size: 14px; color: var(--text-strong); min-width: 0; }
+.pr-goal-top b i { font-style: normal; margin-left: 6px; font-size: 11px; letter-spacing: 0.14em; color: var(--text-3); }
+.pr-goal-top .pr-mini { flex: none; }
+.pr-goal .pr-prog-track span { background: var(--text-3); }
+.pr-goal.is-met .pr-prog-track span { background: var(--up); }
+.pr-goal.is-met .pr-mini { background: rgb(var(--up-rgb) / 0.14); color: var(--up); }
+.pr-goal.is-miss .pr-prog-track span { background: var(--down); }
+.pr-goal.is-miss .pr-mini { background: var(--down-bg); color: var(--down); }
+.pr-goal-persona { display: grid; gap: 10px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.pr-goal-persona.is-met .pr-mini { background: rgb(var(--up-rgb) / 0.14); color: var(--up); }
+.pr-goal-axes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pr-goal-axes li { display: grid; gap: 3px; padding: 9px 12px; border-radius: 9px; background: rgb(255 255 255 / 0.04); min-width: 0; }
+.pr-goal-axes span { font-size: 11px; color: var(--text-3); }
+.pr-goal-axes b { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.pr-goal-axes li.is-met b { color: var(--up); }
+.pr-goal-edit { display: grid; gap: 12px; }
+.pr-goal-line { display: grid; grid-template-columns: minmax(0, 1.6fr) auto minmax(0, 0.8fr) auto auto; gap: 8px; align-items: center; max-width: 620px; }
+.pr-goal-line .input, .pr-goal-target .input, .pr-alert-row .input { min-height: 40px; }
+.pr-goal-dir, .pr-goal-unit { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.pr-goal-unit { min-width: 1.4em; }
+.pr-goal-x { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; color: var(--text-3); cursor: pointer; }
+.pr-goal-x:hover { background: rgb(255 255 255 / 0.07); color: var(--text-strong); }
+.pr-goal-target { display: grid; gap: 6px; max-width: 420px; font-size: 12px; color: var(--text-3); }
+.pr-goal-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.pr-goal-actions .pr-btn, .pr-alert-row .pr-btn { min-height: 40px; padding: 0 18px; }
+
+/* 同人格对比 / 年度前后半段 / comparison tables */
+.pr-peers { display: grid; }
+.pr-peer { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.pr-peer.is-head { border-top: 0; padding-top: 0; font-size: 12px; color: var(--text-3); }
+.pr-peer > :first-child { color: var(--text-2); }
+.pr-peer > :not(:first-child) { text-align: right; }
+.pr-peer b { font-weight: 700; color: var(--text-strong); }
+.pr-peer span.num { color: var(--text-2); }
+
+/* 每日亏损提醒 / daily loss alert */
+.pr-alert-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.pr-alert-row label { display: grid; gap: 6px; font-size: 12px; color: var(--text-3); }
+.pr-alert-input { position: relative; display: block; width: 150px; }
+.pr-alert-input i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-style: normal; color: var(--text-3); pointer-events: none; }
+.pr-alert-input .input { width: 100%; padding-left: 26px; }
+
+/* 模拟盘预览 / demo preview */
+.pr-preview.is-ready { grid-template-columns: 150px minmax(0, 1fr); gap: 26px; align-items: center;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--fam) 14%, transparent) 0%, transparent 60%), var(--surface); }
+.pr-preview-art img { width: 100%; height: auto; border-radius: var(--r-md); display: block; }
+.pr-preview-body { display: grid; gap: 12px; justify-items: start; min-width: 0; }
+.pr-preview-body .pr-eyebrow { display: flex; align-items: center; gap: 10px; }
+.pr-preview-title { font-family: var(--pr-display); font-stretch: 112%; font-size: clamp(22px, 2.8vw, 30px); line-height: 1.2; font-weight: 800; color: var(--text-strong); }
+.pr-preview .pr-say { font-size: 14px; }
+
+/* ---------- 年度报告 / annual report ---------- */
+.pr-yr-head { display: grid; }
+.pr-yr-top { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 20px 32px; padding: 30px 34px 26px; }
+.pr-yr-top > div:first-child { display: grid; gap: 6px; min-width: 0; }
+.pr-yr-score { display: grid; justify-items: end; gap: 6px; }
+.pr-yr-score > b { font-family: var(--pr-display); font-stretch: 112%; font-size: 64px; line-height: 1; font-weight: 800; letter-spacing: -0.03em; color: var(--fam); }
+.pr-yr-score > span { font-size: 12px; color: var(--text-3); }
+.pr-yr-score .pr-btn { margin-top: 6px; min-height: 40px; }
+.pr-yr-months { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(64px, 132px); justify-content: start; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.pr-yr-months::-webkit-scrollbar { display: none; }
+.pr-yr-months li { display: grid; gap: 4px; justify-items: center; text-align: center; min-width: 0; }
+.pr-yr-bar { position: relative; width: 100%; height: 120px; border-radius: 9px; background: rgb(255 255 255 / 0.035); }
+.pr-yr-bar::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-hi); }
+.pr-yr-bar i { position: absolute; left: 22%; right: 22%; border-radius: 4px; }
+.pr-yr-bar i.is-up { bottom: 50%; background: var(--up); }
+.pr-yr-bar i.is-down { top: 50%; background: var(--down); }
+.pr-yr-months b { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.pr-yr-m { font-size: 12px; color: var(--text-2); }
+.pr-yr-s { font-size: 11px; color: var(--text-3); }
+.pr-yr-journey { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; }
+.pr-yr-journey::-webkit-scrollbar { display: none; }
+.pr-yr-journey li { flex: none; width: 132px; display: grid; gap: 3px; justify-items: center; text-align: center; padding: 14px 10px; border-radius: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fam) 16%, transparent) 0%, transparent 70%), rgb(255 255 255 / 0.03);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fam) 30%, var(--line)); }
+.pr-yr-journey img { width: 72px; height: auto; border-radius: 8px; }
+.pr-yr-journey b { font-size: 13px; color: var(--text-strong); }
+.pr-yr-journey span.num { font-size: 10.5px; letter-spacing: 0.2em; color: var(--text-3); }
+.pr-yr-records { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.pr-yr-records > div { display: grid; gap: 4px; align-content: start; padding: 14px 16px; min-width: 0; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
+.pr-yr-records dt { font-size: 12px; color: var(--text-3); }
+.pr-yr-records dd { font-size: 17px; font-weight: 700; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-yr-call { padding: 12px 16px; border-radius: 12px; font-size: 13px; line-height: 1.6; color: var(--text-strong); background: rgb(var(--up-rgb) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--up-rgb) / 0.28); }
+.pr-yr-cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 14px 12px; }
+.pr-yr-mo { display: grid; gap: 6px; }
+.pr-yr-mo > span { font-size: 12px; color: var(--text-3); }
+.pr-yr-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.pr-yr-grid i { aspect-ratio: 1; border-radius: 3px; background: rgb(255 255 255 / 0.05); }
+.pr-yr-grid i.is-blank { background: none; }
+
+/* ---------- 推荐官客户看板（不在 .pr 里，不依赖它的变量）/ ambassador board (lives outside .pr) ---------- */
+.pr-board { display: grid; gap: 16px; margin-bottom: 20px; padding: 22px 24px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05); }
+.pr-board .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.pr-board .is-up { color: var(--up); }
+.pr-board .is-down { color: var(--down); }
+.pr-board-head { display: grid; gap: 4px; }
+.pr-board-head h3 { font-size: 16px; font-weight: 700; color: var(--text-strong); }
+.pr-board-head p, .pr-board-empty { font-size: 12px; line-height: 1.6; color: var(--text-3); }
+.pr-board-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.pr-board-stats > div { display: grid; gap: 4px; padding: 12px 14px; background: var(--surface-2); min-width: 0; }
+.pr-board-stats dt { font-size: 12px; color: var(--text-3); }
+.pr-board-stats dd { font-size: 20px; font-weight: 700; color: var(--text-strong); }
+.pr-board-stats .is-warn dd { color: var(--down); }
+.pr-board-mix { display: grid; gap: 10px; }
+.pr-board-bar { display: flex; height: 8px; gap: 2px; border-radius: 4px; overflow: hidden; }
+.pr-board-bar i { min-width: 4px; }
+.pr-board-mix ul { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--text-2); }
+.pr-board-mix li { display: inline-flex; align-items: center; gap: 6px; }
+.pr-board-mix li b { color: var(--text-strong); }
+.pr-board-mix li span.num { color: var(--text-3); }
+.pr-board-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.pr-board-tabs { display: inline-flex; justify-self: start; padding: 3px; gap: 2px; border-radius: var(--r-md); background: rgb(0 0 0 / 0.35); border: 1px solid var(--line); }
+.pr-board-tabs button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.pr-board-tabs button.on { background: var(--purple); color: #fff; }
+.pr-board-tabs button span { margin-left: 4px; opacity: 0.8; }
+.pr-board-list { display: grid; }
+.pr-board-list li { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.1fr) 92px minmax(0, 1.2fr) auto; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.pr-board-who { display: grid; gap: 2px; min-width: 0; }
+.pr-board-who b { color: var(--text-strong); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-board-who span { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-board-persona { display: inline-flex; align-items: center; gap: 8px; color: var(--text); min-width: 0; }
+.pr-board-dim { color: var(--text-3); }
+.pr-board-score { display: flex; align-items: baseline; gap: 8px; font-weight: 700; color: var(--text-strong); }
+.pr-board-score small { font-size: 11px; font-weight: 600; }
+.pr-board-last { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--text-2); font-size: 12px; }
+.pr-board-tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; background: rgb(255 255 255 / 0.08); color: var(--text-2); }
+.pr-board-tag.is-down { background: var(--down-bg); color: var(--down); }
+.pr-board-more { justify-self: start; background: none; border: 0; padding: 6px 0; color: var(--purple-hi); font-size: 13px; cursor: pointer; }
+
+@media (max-width: 1020px) {
+  .pr-grid2.is-even { grid-template-columns: minmax(0, 1fr); }
+  .pr-goals { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .pr-wk { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pr-goal-axes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pr-goal-line { grid-template-columns: minmax(0, 1fr) auto 84px auto auto; gap: 6px; }
+  .pr-preview.is-ready { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .pr-preview-art { max-width: 150px; margin: 0 auto; }
+  .pr-yr-top { padding: 22px 18px 20px; }
+  .pr-yr-score { justify-items: start; }
+  .pr-yr-score > b { font-size: 52px; }
+  .pr-board { padding: 18px 16px; }
+  .pr-board-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pr-board-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+  .pr-board-persona { grid-column: 1; }
+  .pr-board-score { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  .pr-board-last { grid-column: 1 / -1; }
+  .pr-board-list li .btn { grid-column: 1 / -1; justify-self: start; }
+}

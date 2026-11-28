@@ -392,6 +392,9 @@ class GamificationSettingsPatchIn(BaseModel):
     winrateRequireProfit: bool | None = None
     personaVisible: bool | None = None
     personaAiComment: bool | None = None
+    personaDemoPreview: bool | None = None
+    personaGoals: bool | None = None
+    personaAgentBoard: bool | None = None
     # 公开比赛（设计 §1.3/§1.7）：总开关与主推比赛 id（传 null 清空 = 自动挑选）。
     # Public competitions: master switch and featured id (null clears = automatic).
     competitionsPublicEnabled: bool | None = None

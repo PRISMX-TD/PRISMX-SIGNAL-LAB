@@ -81,6 +81,21 @@ export function focusLeg(f: FocusTrade): TradeLeg | null {
   return { side: f.side, t1: f.t1, p1: f.p1, t2: f.t2, p2: f.p2, profit: f.profit }
 }
 
+// 「回放这一单」放到哪一步了：还没到开仓 / 持仓中 / 已平仓。回放时图上只有游标之前的 K 线，
+// 按最后一根 K 线再加一根的宽度判断——那一根走完之前，落在它里面的开仓 / 平仓就算已经发生。
+// How far "replay this trade" got: before the entry, in the trade, or closed. A replay only holds the
+// bars up to its cursor; the edge is the last bar plus one bar width, so an entry or exit inside the
+// last bar counts as reached.
+export type FocusPhase = 'before' | 'open' | 'closed'
+export function focusPhase(times: readonly number[], t1: number, t2: number | null): FocusPhase {
+  const n = times.length
+  if (!n) return 'before'
+  const step = n > 1 ? Math.max(1, times[n - 1] - times[n - 2]) : 60
+  const edge = times[n - 1] + step
+  if (edge <= t1) return 'before'
+  return t2 != null && edge <= t2 ? 'open' : 'closed'
+}
+
 /** 路由 state 里取出来的东西未必可信（刷新、别处 navigate），逐项验过再用。
  *  Router state can be anything (reloads, other navigations): validate before use. */
 export function readFocusState(state: unknown): FocusTrade | null {

@@ -34,6 +34,8 @@ const CSS = `
 .pc-fam{position:absolute;right:20px;top:22px;font-size:11px;font-weight:700;letter-spacing:.04em;padding:3px 9px;border-radius:999px}
 .pc-art{position:absolute;left:50%;top:54px;width:174px;height:200px;transform:translateX(-50%)}
 .pc-art img{width:100%;height:100%;object-fit:contain;display:block;border-radius:12px}
+.pc-demo{position:absolute;left:50%;top:232px;transform:translateX(-50%);font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:999px;
+  background:rgba(11,12,16,.82);border:1px solid rgba(255,255,255,.28);white-space:nowrap}
 .pc-code{position:absolute;left:0;right:0;top:256px;text-align:center;font-size:12px;font-weight:800;letter-spacing:.32em;opacity:.75}
 .pc-title{position:absolute;left:0;right:0;top:272px;text-align:center;font-size:28px;font-weight:800;letter-spacing:.02em}
 .pc-say{position:absolute;left:30px;right:30px;top:314px;text-align:center;font-size:12px;line-height:1.55;opacity:.86;
@@ -60,7 +62,9 @@ export interface PersonaCardText {
   label: string         // 「我的交易人格」/ "My trading persona"
 }
 
-export async function buildPersonaCard(t: TFunction, persona: Persona, style: ArtStyle) {
+// tag：卡片上多一条标记（模拟盘预览的人格必须标明，免得被当成实盘人格）。
+// tag: an extra mark on the card (a demo-preview persona must say so).
+export async function buildPersonaCard(t: TFunction, persona: Persona, style: ArtStyle, tag?: string) {
   const [{ px, SHARE_LINK }, art] = await Promise.all([
     import('../share/cardEnv'),
     toDataUrl(artUrl(persona.code, style)),
@@ -89,6 +93,7 @@ export async function buildPersonaCard(t: TFunction, persona: Persona, style: Ar
       `<div class="pc-brand"><img src="/logo-256.png" alt=""><div><b>信号实验室</b><i>SIGNAL LAB</i></div></div>` +
       `<div class="pc-fam" style="background:${c.main}26;color:${c.main}">${esc(text.family)}</div>` +
       `<div class="pc-art"><img src="${art}" alt=""></div>` +
+      (tag ? `<div class="pc-demo">${esc(tag)}</div>` : '') +
       `<div class="pc-code">${esc(persona.code)}</div>` +
       `<div class="pc-title">${esc(text.title)}</div>` +
       `<div class="pc-say">${esc(text.say)}</div>` +

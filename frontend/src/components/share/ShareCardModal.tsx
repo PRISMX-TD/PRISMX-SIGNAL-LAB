@@ -28,7 +28,7 @@ interface Props {
   // 导出、保存、分享仍走这里同一条路。build 拿到昵称，返回卡片的 CSS 与 HTML（图片须是 data URL）。
   // A card with its own layout (the persona card): no template styles or privacy toggle, but the same
   // export / save / share path. build gets the nickname and returns CSS + HTML (images as data URLs).
-  custom?: { title: string; fileStem: string; build: (nickname: string) => { css: string; html: string } }
+  custom?: { title: string; fileStem: string; build: (nickname: string, variantKey?: string) => { css: string; html: string } }
   onClose: () => void
 }
 
@@ -110,7 +110,7 @@ export default function ShareCardModal({ type, variants, enhance, custom, onClos
   const title = custom ? custom.title : t(`share.title.${type}`)
 
   const card = useMemo(() => {
-    if (custom) return custom.build(nickname)
+    if (custom) return custom.build(nickname, variant?.key)
     const data = buildEnvData(input, t, nickname)
     return renderCardHtml(style, type, data, {
       mode: (value ?? 0) >= 0 ? 'win' : 'loss',
@@ -118,7 +118,7 @@ export default function ShareCardModal({ type, variants, enhance, custom, onClos
       medal: input.badge?.id ?? '',
       key: `sc${keyId}`,
     })
-  }, [custom, input, t, nickname, style, type, value, privacy, privacyAvailable, keyId])
+  }, [custom, variant?.key, input, t, nickname, style, type, value, privacy, privacyAvailable, keyId])
 
   // 换了任何东西，之前生成的图就作废；随后在后台提前生成新图。iOS 的分享 / 下载要求「刚点过」的用户手势，
   // 点按钮时再花一秒生成，手势就过期了、按钮看起来没反应——所以预览一稳定就先生成好。

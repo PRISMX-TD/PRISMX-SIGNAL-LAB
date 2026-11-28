@@ -107,7 +107,7 @@ export interface PersonaPrevious {
   medianHoldMin: number | null
 }
 
-export interface PersonaReport {
+export interface PersonaReport extends PersonaReportExtras {
   version: number
   period: string
   live: boolean
@@ -135,9 +135,179 @@ export interface PersonaReport {
   trend?: { period: string; score: number }[]
 }
 
-export type PersonaOverview =
+export type PersonaOverview = (
   | { status: 'demo' }
   | { status: 'locked'; progress: PersonaProgress }
   | { status: 'unlocked'; persona: Persona; months: string[]; report: PersonaReport | null }
+) & PersonaOverviewExtras
 
 export interface PersonaClient { email: string; nickname: string | null }
+
+// ---------------------------------------------------------------- 2026-11-28（rev 58）新增 / added
+// 周小结（只在当月报告里）：本周和上周，周一到周日（UTC）。/ Weekly digest (live month only), Monday–Sunday UTC.
+export interface PersonaWeek {
+  start: string
+  end: string
+  current: boolean
+  summary: Pick<PersonaSummary, 'trades' | 'wins' | 'losses' | 'winRate' | 'profit' | 'payoff' | 'score' | 'tradingDays' | 'greenDays' | 'maxDrawdown' | 'medianHoldMin'>
+  tags: Record<PersonaTag, number>
+  topSymbol: PersonaBucket | null
+  bestDay: { day: string; profit: number; trades: number } | null
+  worstDay: { day: string; profit: number; trades: number } | null
+}
+
+// 纪律连续记录：连续带止损的笔数、连续多少天没有扛单 / 报复加仓 / 反向挪止损。
+// Discipline streaks: trades in a row with a stop, days in a row without a held loser / revenge / moved stop.
+export type PersonaStreakKey = 'stops' | 'noHeldLoser' | 'noRevenge' | 'noMovedStop'
+export interface PersonaStreak {
+  key: PersonaStreakKey
+  unit: 'trades' | 'days'
+  current: number
+  best: number
+  broken: { at: string; length: number } | null
+}
+
+// 本月目标 + 目标人格。dir：ge = 做到这个数以上，le = 不超过这个数。
+// Monthly goals + target persona. dir: ge = reach at least, le = stay at or below.
+export type PersonaGoalKey = 'winRate' | 'payoff' | 'score' | 'maxDrawdown' | 'trades' | 'unprotected' | 'heldLoser' | 'revenge' | 'movedStop'
+export interface PersonaGoalRow {
+  key: PersonaGoalKey
+  dir: 'ge' | 'le'
+  target: number
+  value: number | null
+  met: boolean
+}
+export interface PersonaTarget {
+  code: string
+  family: PersonaFamily
+  axes: { axis: PersonaAxisKey; want: string; have: string | null; value: number | null; met: boolean }[]
+  reached: boolean
+}
+export interface PersonaGoal {
+  goals: PersonaGoalRow[]
+  target: PersonaTarget | null
+  setAt: string | null
+}
+
+// 同人格对比：同代号（不足 20 人时退到同家族）的人的中位数。
+// Same-persona comparison: medians over users sharing the code (the family when fewer than 20).
+export interface PersonaPeers {
+  scope: 'code' | 'family'
+  key: string
+  family: PersonaFamily
+  count: number
+  medians: Record<'medianHoldMin' | 'perDay' | 'payoff' | 'holdRatio' | 'signalShare' | 'manageShare', number | null>
+}
+
+export interface PersonaFeatures {
+  demoPreview: boolean
+  goals: boolean
+  agentBoard: boolean
+  goalMenu: Record<PersonaGoalKey, { dir: 'ge' | 'le'; min: number; max: number }> | null
+  goalsMax: number
+}
+
+export interface PersonaAlert { limit: number | null; enabled: boolean; firedToday: boolean }
+
+// 模拟盘预览：用模拟盘的单算的人格（不够条件时是模拟盘上的进度）。
+// Demo preview: a persona computed from demo trades, or the demo progress while not enough.
+export type PersonaPreview =
+  | { unlocked: true; persona: Persona }
+  | { unlocked: false; progress: PersonaProgress }
+
+export interface PersonaReportExtras {
+  weeks?: PersonaWeek[]
+  streaks?: PersonaStreak[]
+  goal?: PersonaGoal | null
+}
+
+export interface PersonaOverviewExtras {
+  features?: PersonaFeatures
+  alert?: PersonaAlert
+  preview?: PersonaPreview
+  annuals?: number[]
+  peers?: PersonaPeers | null
+}
+
+// 年度报告 / annual report
+export interface PersonaAnnualMonth {
+  period: string
+  trades: number
+  profit: number
+  winRate: number | null
+  score: number | null
+  code: string | null
+  badges: PersonaBadge[]
+}
+export interface PersonaAnnualHalf {
+  trades: number
+  winRate: number | null
+  payoff: number | null
+  score: number | null
+  profit: number
+  tagRates: Record<PersonaTag, number | null>
+}
+type DayRow = { day: string; profit: number; trades: number }
+export interface PersonaAnnual {
+  version: number
+  year: number
+  live: boolean
+  asOf: string
+  months: string[]
+  firstTradeAt: string | null
+  persona: Persona | null
+  summary: PersonaSummary
+  calendar: DayRow[]
+  monthly: PersonaAnnualMonth[]
+  journey: { steps: { period: string; code: string }[]; distinct: number; changes: number; mostCommon: string | null }
+  breakdowns: PersonaReport['breakdowns']
+  tags: PersonaReport['tags']
+  badges: Partial<Record<PersonaBadge, number>>
+  streaks: { key: PersonaStreakKey; unit: 'trades' | 'days'; best: number }[]
+  halves: { split: string; first: PersonaAnnualHalf; second: PersonaAnnualHalf } | null
+  records: {
+    bestTrade: PersonaTradeRef | null
+    worstTrade: PersonaTradeRef | null
+    longestHold: (PersonaTradeRef & { holdMin: number }) | null
+    bestDay: DayRow | null
+    worstDay: DayRow | null
+    busiestDay: DayRow | null
+    bestMonth: string | null
+    worstMonth: string | null
+    winRun: number
+    lossRun: number
+    topSymbol: PersonaBucket | null
+    bestSymbol: PersonaBucket | null
+    topSession: PersonaBucket | null
+    topWeekday: PersonaBucket | null
+    holdHours: number
+  }
+  archivedAt: string | null
+}
+
+// 推荐官的客户看板 / ambassador customer board
+export interface PersonaBoardClient {
+  email: string
+  nickname: string | null
+  code: string | null
+  family: PersonaFamily | null
+  period: string | null
+  score: number | null
+  scoreDelta: number | null
+  trades: number | null
+  lastTradeAt: string | null
+  idleDays: number | null
+  inactive: boolean
+  dropped: boolean
+}
+export interface PersonaBoard {
+  total: number
+  withPersona: number
+  families: Partial<Record<PersonaFamily, number>>
+  codes: Record<string, number>
+  inactive: number
+  dropped: number
+  inactiveDays?: number
+  dropPoints?: number
+  clients: PersonaBoardClient[]
+}
