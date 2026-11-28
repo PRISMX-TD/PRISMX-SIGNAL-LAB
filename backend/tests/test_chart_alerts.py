@@ -386,8 +386,11 @@ def test_race_between_workers_notifies_once(env):
     assert E._fire_sync(rec, 2701, now) is None  # 同一个 seq 第二次抢不到 / same seq loses
 
 
-def test_drawing_trendline_alert(env):
-    now = datetime.now(timezone.utc).timestamp()
+def test_drawing_trendline_alert(env, monkeypatch):
+    # 固定在周二：画线几何会扣掉周末休市的 48 小时，用真实时钟的话周末跑这条用例三个点会落在同一个开市秒上
+    # Pinned to a Tuesday: line geometry drops the 48 h weekend, so on a real weekend clock all three points collapse
+    now = datetime(2026, 11, 24, 10, 0, 5, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(E.time, "time", lambda: now)
     line = {"t1": now - 7200, "p1": 2690.0, "t2": now - 3600, "p2": 2695.0, "extL": False, "extR": True}
     _add(env, kind="drawing", cond="cross", drawing_id="d1", spec=json.dumps({"lines": [line]}))
     # 线此刻约在 2700 / the line is near 2700 now
